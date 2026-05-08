@@ -1086,6 +1086,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
 end))
 
 -- Auto Equip Tool (waits for backpack and character without breaking loop)
+-- FIXED: No longer unequips tools when Auto Equip is OFF
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
@@ -1101,7 +1102,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             targetTool = bp:FindFirstChild(states.selectedTool) or char:FindFirstChild(states.selectedTool)
         end
         
-        -- Logic: If we are meant to auto-equip
+        -- Logic: If Auto Equip is ON
         if states.autoEquip then
             if targetTool then
                 if targetTool.Parent ~= char then 
@@ -1124,17 +1125,8 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                     end
                 end
             end
-            
-        -- Logic: If Auto Equip is OFF
-        else
-            if not states.autoGlitchTrain then
-                for _, t in ipairs(char:GetChildren()) do
-                    if t:IsA("Tool") and t.Name ~= "Punch" then
-                        pcall(function() t.Parent = bp end)
-                    end
-                end
-            end
         end
+        -- Auto Equip OFF → do nothing; tools are managed by the dedicated glitch loop only when Auto Glitch is ON
     end
 end))
 
