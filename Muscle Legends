@@ -1,7 +1,6 @@
 -- ================================================================
 -- ANTI-DUPLICATION / CLEANUP PREVIOUS SCRIPT
 -- ================================================================
-local getgenv = getgenv or function() return _G end
 if getgenv().ML_Expert_UI then pcall(function() getgenv().ML_Expert_UI:Destroy() end) end
 if getgenv().ML_Expert_Loops then
     for _, loop in ipairs(getgenv().ML_Expert_Loops) do pcall(task.cancel, loop) end
@@ -17,9 +16,6 @@ local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local player = Players.LocalPlayer
-
--- Reference Muscle Event correctly
-local muscleEvent = ReplicatedStorage:WaitForChild("rEvents"):WaitForChild("muscleEvent")
 
 ----------------------------------------------------------------
 -- FILE SAVE (DISCONNECT & CONFIG)
@@ -1217,8 +1213,10 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                 -- NonTeleport no longer edits the originalPosition value
             end
             pcall(function()
-                muscleEvent:FireServer("punch", "leftHand")
-                muscleEvent:FireServer("punch", "rightHand")
+                local args1 = { [1] = "punch", [2] = "leftHand" }
+                player.muscleEvent:FireServer(unpack(args1))
+                local args2 = { [1] = "punch", [2] = "rightHand" }
+                player.muscleEvent:FireServer(unpack(args2))
             end)
         end
 
@@ -1298,7 +1296,7 @@ end))
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function() 
     while true do 
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end 
-        if states.autoLiftNoAnim then pcall(function() muscleEvent:FireServer("rep") end) end 
+        if states.autoLiftNoAnim then pcall(function() player.muscleEvent:FireServer("rep") end) end 
     end 
 end))
 
@@ -1388,7 +1386,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                     end
                 end
                 
-                if states.currentPetLabel then if states.currentPetTable == "Basic" then handleItemSelection(states.currentPetLabel, petRefsBasic, petDetails) elseif states.currentPetTable == "Advanced" then handleItemSelection(states.currentPetLabel, petRefsAdv, petDetails) elseif states.currentPetTable == "Rare" then handleItemSelection(states.currentPetLabel, petRefsRare, petDetails) elseif states.currentPetTable == "Epic" then handleItemSelection(states.currentPetLabel, petRefsAdv, petDetails) elseif states.currentPetTable == "Unique" then handleItemSelection(states.currentPetLabel, petRefsUnique, petDetails) end end
+                if states.currentPetLabel then if states.currentPetTable == "Basic" then handleItemSelection(states.currentPetLabel, petRefsBasic, petDetails) elseif states.currentPetTable == "Advanced" then handleItemSelection(states.currentPetLabel, petRefsAdv, petDetails) elseif states.currentPetTable == "Rare" then handleItemSelection(states.currentPetLabel, petRefsRare, petDetails) elseif states.currentPetTable == "Epic" then handleItemSelection(states.currentPetLabel, petRefsEpic, petDetails) elseif states.currentPetTable == "Unique" then handleItemSelection(states.currentPetLabel, petRefsUnique, petDetails) end end
                 if states.currentAuraLabel then if states.currentAuraTable == "Basic" then handleAuraSelection(states.currentAuraLabel, auraRefsBasic, auraDetails) elseif states.currentAuraTable == "Advanced" then handleAuraSelection(states.currentAuraLabel, auraRefsAdv, auraDetails) elseif states.currentAuraTable == "Rare" then handleAuraSelection(states.currentAuraLabel, auraRefsRare, auraDetails) elseif states.currentAuraTable == "Epic" then handleAuraSelection(states.currentAuraLabel, auraRefsEpic, auraDetails) elseif states.currentAuraTable == "Unique" then handleAuraSelection(states.currentAuraLabel, auraRefsUnique, auraDetails) end end
                 
                 local uStr, ultF = "", tp:FindFirstChild("ultimatesFolder");
