@@ -17,6 +17,8 @@ local TeleportService = game:GetService("TeleportService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local player = Players.LocalPlayer
 
+local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+
 ----------------------------------------------------------------
 -- FILE SAVE (DISCONNECT & CONFIG)
 ----------------------------------------------------------------
@@ -435,7 +437,10 @@ for i, tName in ipairs(tabs) do
     f.Visible = (i == 1)
     f.CanvasSize = UDim2.new(0, 0, 0, 0)
     f.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    f.ScrollBarThickness = 2
+    f.ScrollingEnabled = true
+    f.ClipsDescendants = true
+    f.ElasticBehavior = Enum.ElasticBehavior.WhenScrollable
+    f.ScrollBarThickness = isMobile and 6 or 2
     
     local layout = Instance.new("UIListLayout", f)
     layout.Padding = UDim.new(0, 5)
@@ -497,7 +502,10 @@ local function createDropdown(parent, text, options, multi, callback, checkState
     list.Visible = false
     list.ZIndex = 10
     list.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-    list.ScrollBarThickness = 4
+    list.ScrollBarThickness = isMobile and 6 or 4
+    list.ScrollingEnabled = true
+    list.ClipsDescendants = true
+    list.ElasticBehavior = Enum.ElasticBehavior.WhenScrollable
     
     headerBtn.MouseButton1Click:Connect(function()
         list.Visible = not list.Visible
