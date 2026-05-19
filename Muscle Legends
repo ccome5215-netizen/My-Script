@@ -397,7 +397,7 @@ TitleText.TextColor3 = Color3.new(1, 1, 1)
 TitleText.TextXAlignment = Enum.TextXAlignment.Left
 
 if UserInputService.TouchEnabled then
-    MainFrame.Size = UDim2.fromOffset(300, 320)
+    MainFrame.Size = UDim2.fromOffset(300, 400)
     MainFrame.Visible = false
     local MobileToggle = Instance.new("TextButton", ScreenGui)
     MobileToggle.Size = UDim2.fromOffset(45, 45)
@@ -440,10 +440,7 @@ for i, tName in ipairs(tabs) do
     f.ScrollingEnabled = true
     f.ClipsDescendants = true
     f.ElasticBehavior = Enum.ElasticBehavior.WhenScrollable
-    -- FIX: thicker scrollbar for mobile, vertical scroll direction, visible bar
-    f.ScrollBarThickness = isMobile and 10 or 2
-    f.ScrollBarImageTransparency = 0
-    f.ScrollingDirection = Enum.ScrollingDirection.Y
+    f.ScrollBarThickness = isMobile and 6 or 2
     
     local layout = Instance.new("UIListLayout", f)
     layout.Padding = UDim.new(0, 5)
