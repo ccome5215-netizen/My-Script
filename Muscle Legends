@@ -440,14 +440,10 @@ for i, tName in ipairs(tabs) do
     f.ScrollingEnabled = true
     f.ClipsDescendants = true
     f.ElasticBehavior = Enum.ElasticBehavior.WhenScrollable
-    f.ScrollBarThickness = isMobile and 8 or 2
-    
-    -- Mobile friendly scrolling settings
-    if isMobile then
-        f.TouchScrollingEnabled = true
-        f.ScrollingDirection = Enum.ScrollingDirection.Y
-        f.ElasticBehavior = Enum.ElasticBehavior.Always
-    end
+    -- FIX: thicker scrollbar for mobile, vertical scroll direction, visible bar
+    f.ScrollBarThickness = isMobile and 10 or 2
+    f.ScrollBarImageTransparency = 0
+    f.ScrollingDirection = Enum.ScrollingDirection.Y
     
     local layout = Instance.new("UIListLayout", f)
     layout.Padding = UDim.new(0, 5)
