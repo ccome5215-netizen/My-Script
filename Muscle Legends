@@ -397,7 +397,7 @@ TitleText.TextColor3 = Color3.new(1, 1, 1)
 TitleText.TextXAlignment = Enum.TextXAlignment.Left
 
 if UserInputService.TouchEnabled then
-    MainFrame.Size = UDim2.fromOffset(300, 400)
+    MainFrame.Size = UDim2.fromOffset(300, 320)
     MainFrame.Visible = false
     local MobileToggle = Instance.new("TextButton", ScreenGui)
     MobileToggle.Size = UDim2.fromOffset(45, 45)
@@ -450,6 +450,16 @@ for i, tName in ipairs(tabs) do
         for _, other in pairs(frames) do other.Visible = false end
         f.Visible = true
     end)
+end
+
+-- Mobile-only: make the Farm tab properly scrollable
+if isMobile then
+    local farmFrame = frames["Farm"]
+    if farmFrame then
+        farmFrame.ScrollingDirection = Enum.ScrollingDirection.Y
+        farmFrame.ScrollBarThickness = 10
+        farmFrame.ScrollBarImageTransparency = 0
+    end
 end
 
 ----------------------------------------------------------------
