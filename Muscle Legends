@@ -66,8 +66,8 @@ local states = {
     viewing = false, withoutFormatNum = false, autoChest = false, autoFortuneWheel = false,
     currentPetLabel = nil, currentPetTable = nil, currentAuraLabel = nil, currentAuraTable = nil,
     lessLag = false,
-    selectedMap = nil, selectedGym = nil, autoGym = false,
-    autoGymThread = nil
+    selectedMap = nil, selectedGym = nil, autoGym = false, autoGymThread = nil,
+    selectedCrystal = nil      -- for Auto Crystal tab
 }
 
 local rockCache = {}
@@ -420,12 +420,12 @@ TabContainer.Position = UDim2.fromOffset(0, 30)
 TabContainer.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 
 local frames = {}
-local tabs = {"Auto Farm", "Farm", "Killer", "Stats", "Auto Gym"}
+local tabs = {"Auto Farm", "Farm", "Killer", "Stats", "Auto Gym", "Auto Crystal"}
 
 for i, tName in ipairs(tabs) do
     local btn = Instance.new("TextButton", TabContainer)
-    btn.Size = UDim2.new(0.2, 0, 1, 0)
-    btn.Position = UDim2.new((i-1)*0.2, 0, 0, 0)
+    btn.Size = UDim2.new(1/#tabs, 0, 1, 0)    -- dynamically size for 6 tabs
+    btn.Position = UDim2.new((i-1)/#tabs, 0, 0, 0)
     btn.Text = tName
     btn.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
     btn.TextColor3 = Color3.new(1, 1, 1)
@@ -1001,6 +1001,55 @@ local autoGymBtn = createToggle(f5, "Auto Gym", function(val)
         stopAutoGym()
     end
     return val
+end)
+
+----------------------------------------------------------------
+-- TAB 6: AUTO CRYSTAL (NEW)
+----------------------------------------------------------------
+local f6 = frames["Auto Crystal"]
+
+-- Scan cPetShopFolder one time for pets/auras (skip "Token"/"Tokens")
+local crystalOptions = {}
+local function scanCrystalFolder()
+    local folder = ReplicatedStorage:FindFirstChild("cPetShopFolder")
+    if not folder then return {} end
+    local list = {}
+    for _, child in ipairs(folder:GetChildren()) do
+        if child.Name ~= "Token" and child.Name ~= "Tokens" then
+            table.insert(list, child.Name)
+        end
+    end
+    return list
+end
+
+crystalOptions = scanCrystalFolder()
+if #crystalOptions == 0 then
+    table.insert(crystalOptions, "Nothing available")
+end
+
+local crystalDD = createDropdown(f6, "Pet/Aura Dropdown", crystalOptions, false, function(v)
+    if v == "Nothing available" then
+        states.selectedCrystal = nil
+    else
+        states.selectedCrystal = v
+    end
+end)
+
+-- Buy button
+local buyCrystalBtn = Instance.new("TextButton", f6)
+buyCrystalBtn.Size = UDim2.new(1, -10, 0, 35)
+buyCrystalBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
+buyCrystalBtn.Text = "Buy Crystal"
+buyCrystalBtn.TextColor3 = Color3.new(1, 1, 1)
+buyCrystalBtn.MouseButton1Click:Connect(function()
+    if not states.selectedCrystal then return end
+    local folder = ReplicatedStorage:FindFirstChild("cPetShopFolder")
+    if not folder then return end
+    local target = folder:FindFirstChild(states.selectedCrystal)
+    if not target then return end
+    pcall(function()
+        ReplicatedStorage.cPetShopRemote:InvokeServer(target)
+    end)
 end)
 
 ----------------------------------------------------------------
