@@ -68,7 +68,12 @@ local states = {
     lessLag = false,
     selectedMap = nil, selectedGym = nil, autoGym = false,
     autoGymThread = nil,
-    selectedCrystal = nil
+    selectedCrystal = nil,
+    
+    -- Glitchable Rebirth System Variables
+    selectedGlitchRock = nil,
+    glitchRockValue = 0,
+    calculatedExpGives = "N/A"
 }
 
 local rockCache = {}
@@ -90,6 +95,20 @@ local rockData = {
     ["Legend Rock"] = {req = 1000000, name = "Rock Of Legends", idx = 1},
     ["Muscle King Rock"] = {req = 5000000, name = "Muscle King Mountain", idx = 1},
     ["Jungle Rock"] = {req = 10000000, name = "Ancient Jungle Rock", idx = 1}
+}
+
+-- Glitchable Rebirth Rock Calculations Dictionary
+local glitchRockValues = {
+    ["Tiny Rock"] = 0.025,
+    ["Punching Rock"] = 0.05,
+    ["Large Rock"] = 0.75,
+    ["Golden Rock"] = 0.2,
+    ["Frozen Rock"] = 0.375,
+    ["Mystic Rock"] = 0.75,
+    ["Inferno Rock"] = 1.125,
+    ["Legends Rock"] = 2.5,
+    ["Muscle King Rock"] = 12.5,
+    ["Jungle Rock"] = 16.25
 }
 
 -- Gym data
@@ -288,6 +307,11 @@ local function getStrength()
     return player.leaderstats and player.leaderstats:FindFirstChild("Strength") and player.leaderstats.Strength.Value or 0
 end
 
+-- Get current Rebirths from local localplayer logic
+local function getPlayerRebirths()
+    return player.leaderstats and player.leaderstats:FindFirstChild("Rebirths") and player.leaderstats.Rebirths.Value or 0
+end
+
 -- Stop auto gym
 local function stopAutoGym()
     if states.autoGymThread then
@@ -417,22 +441,32 @@ else
     end)
 end
 
+-- Tab container sizing and scroll bar setups
 local TabContainer = Instance.new("Frame", MainFrame)
 TabContainer.Size = UDim2.new(1, 0, 0, 35)
 TabContainer.Position = UDim2.fromOffset(0, 30)
 TabContainer.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 
+-- IMPLEMENT COMPACT SCROLLABLE HORIZONTAL BAR SYSTEMS FOR ALL PLATFORMS FOR EXTRA TABS
+local TabScroller = Instance.new("ScrollingFrame", TabContainer)
+TabScroller.Size = UDim2.new(1, 0, 1, 0)
+TabScroller.BackgroundTransparency = 1
+TabScroller.ScrollingDirection = Enum.ScrollingDirection.X
+TabScroller.CanvasSize = UDim2.new(0, 800, 0, 0) -- Scaled out to fit left-to-right/right-to-left layout
+TabScroller.ScrollBarThickness = 4
+TabScroller.ScrollBarImageTransparency = 0.2
+
 local frames = {}
-local tabs = {"Auto Farm", "Farm", "Killer", "Stats", "Auto Gym", "Auto Crystal"}
+local tabs = {"Auto Farm", "Farm", "Killer", "Stats", "Glitchable Rebirth", "Auto Gym", "Auto Crystal"}
 
 for i, tName in ipairs(tabs) do
-    local btn = Instance.new("TextButton", TabContainer)
-    btn.Size = UDim2.new(1 / #tabs, 0, 1, 0)
-    btn.Position = UDim2.new((i-1)*(1 / #tabs), 0, 0, 0)
+    local btn = Instance.new("TextButton", TabScroller)
+    btn.Size = UDim2.new(0, 110, 1, -4)
+    btn.Position = UDim2.new(0, (i-1)*113 + 4, 0, 2)
     btn.Text = tName
     btn.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
     btn.TextColor3 = Color3.new(1, 1, 1)
-    btn.TextScaled = true
+    btn.TextSize = 13
     
     local f = Instance.new("ScrollingFrame", MainFrame)
     f.Size = UDim2.new(1, -10, 1, -75)
@@ -444,7 +478,7 @@ for i, tName in ipairs(tabs) do
     f.ScrollingEnabled = true
     f.ClipsDescendants = true
     f.ElasticBehavior = Enum.ElasticBehavior.WhenScrollable
-    f.ScrollBarThickness = isMobile and 8 or 4
+    f.ScrollBarThickness = 8
     
     local layout = Instance.new("UIListLayout", f)
     layout.Padding = UDim.new(0, 6)
@@ -457,7 +491,7 @@ for i, tName in ipairs(tabs) do
     end)
 end
 
--- Force scrollable properties on mobile platforms explicitly
+-- Force scrolling properties on mobile platforms explicitly while preserving PC layout bounds
 if isMobile then
     for _, frame in pairs(frames) do
         frame.ScrollingDirection = Enum.ScrollingDirection.Y
@@ -477,7 +511,7 @@ local function createToggle(parent, text, callback)
     btn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
     btn.Text = text .. " [OFF]"
     btn.TextColor3 = Color3.new(1, 1, 1)
-    btn.TextScaled = isMobile
+    btn.TextSize = 14
     local state = false
     
     SetToggle[btn] = function(newState)
@@ -504,7 +538,7 @@ local function createDropdown(parent, text, options, multi, callback, checkState
     headerText.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
     headerText.Text = text .. " v"
     headerText.TextColor3 = Color3.new(1, 1, 1)
-    headerText.TextScaled = isMobile
+    headerText.TextSize = 14
     headerText.Active = true
     
     -- Hidden button overlay for click detection on the header
@@ -519,7 +553,7 @@ local function createDropdown(parent, text, options, multi, callback, checkState
     list.Visible = false
     list.ZIndex = 10
     list.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-    list.ScrollBarThickness = isMobile and 8 or 5
+    list.ScrollBarThickness = 6
     list.ScrollingEnabled = true
     list.ClipsDescendants = true
     list.ElasticBehavior = Enum.ElasticBehavior.WhenScrollable
@@ -543,7 +577,7 @@ local function createDropdown(parent, text, options, multi, callback, checkState
             o.Position = UDim2.fromOffset(0, (i-1)*30)
             o.Text = tostring(opt)
             o.TextColor3 = Color3.new(1, 1, 1)
-            o.TextScaled = isMobile
+            o.TextSize = 13
             o.ZIndex = 11
             
             if multi and checkStateFunc then
@@ -637,7 +671,7 @@ createToggle(f1, "Auto Glitch", function(val)
 end)
 
 local timerLabel = Instance.new("TextLabel", f1)
-timerLabel.Size = UDim2.new(1, -10, 0, 25); timerLabel.BackgroundTransparency = 1; timerLabel.TextColor3 = Color3.fromRGB(200, 200, 200); timerLabel.Text = "Glitch Timer: 00:00:00:00"; timerLabel.TextScaled = isMobile
+timerLabel.Size = UDim2.new(1, -10, 0, 25); timerLabel.BackgroundTransparency = 1; timerLabel.TextColor3 = Color3.fromRGB(200, 200, 200); timerLabel.Text = "Glitch Timer: 00:00:00:00"; timerLabel.TextSize = 14
 
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while task.wait(1) do
@@ -671,7 +705,7 @@ local toolDD = createDropdown(f1, "Tool Dropdown", toolOptions, false, function(
 createToggle(f1, "Auto Equip Tool", function(v) if v and (not states.selectedTool or states.selectedTool == "NO TOOL FOUND") then return false end; states.autoEquip = v end)
 
 local rebBox = Instance.new("TextBox", f1)
-rebBox.Size = UDim2.new(1, -10, 0, 35); rebBox.Text = Config.RebirthTarget; rebBox.PlaceholderText = "Rebirth Target"; rebBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); rebBox.TextColor3 = Color3.new(1, 1, 1); rebBox.TextScaled = isMobile
+rebBox.Size = UDim2.new(1, -10, 0, 35); rebBox.Text = Config.RebirthTarget; rebBox.PlaceholderText = "Rebirth Target"; rebBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); rebBox.TextColor3 = Color3.new(1, 1, 1); rebBox.TextSize = 14
 rebBox.FocusLost:Connect(function() Config.RebirthTarget = rebBox.Text; SaveConfig() end)
 
 autoRebirthTargetBtn = createToggle(f1, "Auto Rebirth Target", function(v)
@@ -696,27 +730,51 @@ end)
 createToggle(f1, "Fast Punch", function(val) states.fastPunch = val; local p = getPunch(); if p and p:FindFirstChild("attackTime") then p.attackTime.Value = val and 0 or 0.35 end end)
 
 ----------------------------------------------------------------
--- TAB 2: FARM (Scrolling Logic Restored)
+-- TAB 2: FARM
 ----------------------------------------------------------------
 local f2 = frames["Farm"]
 createToggle(f2, "Less Lag", function(val) states.lessLag = val end)
 
 local sizeBox = Instance.new("TextBox", f2)
-sizeBox.Size = UDim2.new(1, -10, 0, 35); sizeBox.Text = Config.SizeValue; sizeBox.PlaceholderText = "Size Value"; sizeBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); sizeBox.TextColor3 = Color3.new(1, 1, 1); sizeBox.TextScaled = isMobile
-sizeBox:GetPropertyChangedSignal("Text"):Connect(function() sizeBox.Text = sizeBox.Text:gsub("%D", "") end)
-sizeBox.FocusLost:Connect(function() local num = tonumber(sizeBox.Text); if not num or num < 1 then sizeBox.Text = "1" elseif num > 100 then sizeBox.Text = "100" else sizeBox.Text = tostring(math.floor(num)) end; Config.SizeValue = sizeBox.Text; SaveConfig() end)
+sizeBox.Size = UDim2.new(1, -10, 0, 35); sizeBox.Text = Config.SizeValue; sizeBox.PlaceholderText = "Size Value"; sizeBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); sizeBox.TextColor3 = Color3.new(1, 1, 1); sizeBox.TextSize = 14
+sizeBox:GetPropertyChangedSignal("Text"):Connect(function() 
+    -- Allows input of "nan" explicitly alongside clean structural filter configurations
+    local text = sizeBox.Text:lower()
+    if text == "nan" then
+        return
+    else
+        sizeBox.Text = sizeBox.Text:gsub("%D", "") 
+    end
+end)
+sizeBox.FocusLost:Connect(function() 
+    if sizeBox.Text:lower() == "nan" then
+        Config.SizeValue = "nan"
+        SaveConfig()
+        return
+    end
+    local num = tonumber(sizeBox.Text); 
+    if not num or num < 1 then 
+        sizeBox.Text = "1" 
+    elseif num > 100 then 
+        sizeBox.Text = "100" 
+    else 
+        sizeBox.Text = tostring(math.floor(num)) 
+    end; 
+    Config.SizeValue = sizeBox.Text; 
+    SaveConfig() 
+end)
 
 createToggle(f2, "Auto Size Toggle", function(v) states.autoSize = v end)
 
 local wsBox = Instance.new("TextBox", f2)
-wsBox.Size = UDim2.new(1, -10, 0, 35); wsBox.Text = Config.WalkSpeed or "16"; wsBox.PlaceholderText = "WalkSpeed"; wsBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); wsBox.TextColor3 = Color3.new(1, 1, 1); wsBox.TextScaled = isMobile
+wsBox.Size = UDim2.new(1, -10, 0, 35); wsBox.Text = Config.WalkSpeed or "16"; wsBox.PlaceholderText = "WalkSpeed"; wsBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); wsBox.TextColor3 = Color3.new(1, 1, 1); wsBox.TextSize = 14
 wsBox:GetPropertyChangedSignal("Text"):Connect(function() wsBox.Text = wsBox.Text:gsub("%D", "") end)
 wsBox.FocusLost:Connect(function() local num = tonumber(wsBox.Text); if not num or num < 1 then wsBox.Text = "16" else wsBox.Text = tostring(math.floor(num)) end; Config.WalkSpeed = wsBox.Text; SaveConfig() end)
 
 createToggle(f2, "Auto WalkSpeed", function(v) states.autoWalkSpeed = v end)
 
 local flySpeedBox = Instance.new("TextBox", f2)
-flySpeedBox.Size = UDim2.new(1, -10, 0, 35); flySpeedBox.Text = Config.FlySpeed or "50"; flySpeedBox.PlaceholderText = "Fly Speed"; flySpeedBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); flySpeedBox.TextColor3 = Color3.new(1, 1, 1); flySpeedBox.TextScaled = isMobile
+flySpeedBox.Size = UDim2.new(1, -10, 0, 35); flySpeedBox.Text = Config.FlySpeed or "50"; flySpeedBox.PlaceholderText = "Fly Speed"; flySpeedBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); flySpeedBox.TextColor3 = Color3.new(1, 1, 1); flySpeedBox.TextSize = 14
 flySpeedBox:GetPropertyChangedSignal("Text"):Connect(function() flySpeedBox.Text = flySpeedBox.Text:gsub("%D", "") end)
 flySpeedBox.FocusLost:Connect(function() Config.FlySpeed = flySpeedBox.Text; SaveConfig() end)
 
@@ -733,18 +791,18 @@ end)
 createToggle(f2, "God Mode", function(v) states.godMode = v end)
 
 local copyPosBtn = Instance.new("TextButton", f2)
-copyPosBtn.Size = UDim2.new(1, -10, 0, 35); copyPosBtn.Text = "Copy My Position"; copyPosBtn.BackgroundColor3 = Color3.fromRGB(40, 60, 60); copyPosBtn.TextColor3 = Color3.new(1, 1, 1); copyPosBtn.TextScaled = isMobile
+copyPosBtn.Size = UDim2.new(1, -10, 0, 35); copyPosBtn.Text = "Copy My Position"; copyPosBtn.BackgroundColor3 = Color3.fromRGB(40, 60, 60); copyPosBtn.TextColor3 = Color3.new(1, 1, 1); copyPosBtn.TextSize = 14
 copyPosBtn.MouseButton1Click:Connect(function() if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then local pos = player.Character.HumanoidRootPart.Position; pcall(function() setclipboard(string.format("%f, %f, %f", pos.X, pos.Y, pos.Z)) end) end end)
 
 local snackBtn = Instance.new("TextButton", f2)
-snackBtn.Size = UDim2.new(1, -10, 0, 35); snackBtn.Text = "Eat All Snacks"; snackBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40); snackBtn.TextColor3 = Color3.new(1, 1, 1); snackBtn.TextScaled = isMobile
+snackBtn.Size = UDim2.new(1, -10, 0, 35); snackBtn.Text = "Eat All Snacks"; snackBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40); snackBtn.TextColor3 = Color3.new(1, 1, 1); snackBtn.TextSize = 14
 snackBtn.MouseButton1Click:Connect(function()
     local skip = {Weight=1, Punch=1, ["Ground Slam"]=1, Stomp=1, Handstands=1, Situps=1, Pushups=1}; local char = player.Character; if not char then return end; local snacksToEat = {}; for _, t in ipairs(player.Backpack:GetChildren()) do if t:IsA("Tool") and not skip[t.Name] then table.insert(snacksToEat, t) end end; for _, t in ipairs(snacksToEat) do t.Parent = char; t:Activate() end; task.wait(); for _, t in ipairs(snacksToEat) do t.Parent = player.Backpack end
 end)
 
 lockPosBtn = createToggle(f2, "Lock Position", function(val) if states.autoMuscleKing and val then return false end; if val and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then states.lockedPos = player.Character.HumanoidRootPart.CFrame else states.lockedPos = nil end; return val end)
-local smallHopBtn = Instance.new("TextButton", f2); smallHopBtn.Size = UDim2.new(1, -10, 0, 35); smallHopBtn.Text = "Small Server Hop"; smallHopBtn.BackgroundColor3 = Color3.fromRGB(40, 60, 60); smallHopBtn.TextColor3 = Color3.new(1, 1, 1); smallHopBtn.TextScaled = isMobile; smallHopBtn.MouseButton1Click:Connect(function() ServerHop("Small") end)
-local largeHopBtn = Instance.new("TextButton", f2); largeHopBtn.Size = UDim2.new(1, -10, 0, 35); largeHopBtn.Text = "Large Server Hop"; largeHopBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40); largeHopBtn.TextColor3 = Color3.new(1, 1, 1); largeHopBtn.TextScaled = isMobile; largeHopBtn.MouseButton1Click:Connect(function() ServerHop("Large") end)
+local smallHopBtn = Instance.new("TextButton", f2); smallHopBtn.Size = UDim2.new(1, -10, 0, 35); smallHopBtn.Text = "Small Server Hop"; smallHopBtn.BackgroundColor3 = Color3.fromRGB(40, 60, 60); smallHopBtn.TextColor3 = Color3.new(1, 1, 1); smallHopBtn.TextSize = 14; smallHopBtn.MouseButton1Click:Connect(function() ServerHop("Small") end)
+local largeHopBtn = Instance.new("TextButton", f2); largeHopBtn.Size = UDim2.new(1, -10, 0, 35); largeHopBtn.Text = "Large Server Hop"; largeHopBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40); largeHopBtn.TextColor3 = Color3.new(1, 1, 1); largeHopBtn.TextSize = 14; largeHopBtn.MouseButton1Click:Connect(function() ServerHop("Large") end)
 
 ----------------------------------------------------------------
 -- TAB 3: KILLER
@@ -889,30 +947,30 @@ end)
 Players.PlayerRemoving:Connect(function(plr) if states.statsTarget == plr.Name then resetStatsUI() end end)
 
 trackBtn = Instance.new("TextButton", f4)
-trackBtn.Size = UDim2.new(1, -10, 0, 35); trackBtn.Text = "Track Stats"; trackBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50); trackBtn.TextColor3 = Color3.new(1, 1, 1); trackBtn.TextScaled = isMobile
+trackBtn.Size = UDim2.new(1, -10, 0, 35); trackBtn.Text = "Track Stats"; trackBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50); trackBtn.TextColor3 = Color3.new(1, 1, 1); trackBtn.TextSize = 14
 trackBtn.MouseButton1Click:Connect(function() if states.statsTarget then states.trackStats = true; trackBtn.BackgroundColor3 = Color3.fromRGB(0, 100, 150) end end)
 
 createToggle(f4, "Without Format Number", function(v) states.withoutFormatNum = v end)
 
 local tpToPlayerBtn = Instance.new("TextButton", f4)
-tpToPlayerBtn.Size = UDim2.new(1, -10, 0, 35); tpToPlayerBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 60); tpToPlayerBtn.Text = "Teleport Player"; tpToPlayerBtn.TextColor3 = Color3.new(1, 1, 1); tpToPlayerBtn.TextScaled = isMobile
+tpToPlayerBtn.Size = UDim2.new(1, -10, 0, 35); tpToPlayerBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 60); tpToPlayerBtn.Text = "Teleport Player"; tpToPlayerBtn.TextColor3 = Color3.new(1, 1, 1); tpToPlayerBtn.TextSize = 14
 tpToPlayerBtn.MouseButton1Click:Connect(function() if states.statsTarget then local tp = Players:FindFirstChild(states.statsTarget); if tp and tp.Character and tp.Character:FindFirstChild("HumanoidRootPart") and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then player.Character.HumanoidRootPart.CFrame = tp.Character.HumanoidRootPart.CFrame end end end)
 
 local statNamesList = {"Strength", "Durability", "Agility", "Rebirth", "Rebirth Multiplier", "Brawl", "Kill", "Gems", "Brawl Kill", "Size", "Speed", "Good Karma", "Evil Karma", "Auto Lift", "Muscle King Time", "Save Size", "Save Speed", "Current Map"}
 local statsDisp = {}
 for _, s in ipairs(statNamesList) do local l = Instance.new("TextLabel", f4);
 l.Size = UDim2.new(1, -10, 0, 25); l.Text = s .. ": None"; l.BackgroundTransparency = 1; l.TextColor3 = Color3.new(1, 1, 1);
-l.TextXAlignment = Enum.TextXAlignment.Left; l.TextScaled = isMobile; statsDisp[s] = l end
+l.TextXAlignment = Enum.TextXAlignment.Left; l.TextSize = 13; statsDisp[s] = l end
 
 createToggle(f4, "View Player", function(val) states.viewing = val; if not val and player.Character and player.Character:FindFirstChild("Humanoid") then workspace.CurrentCamera.CameraSubject = player.Character.Humanoid end end)
 
 local invHeader = Instance.new("TextLabel", f4);
 invHeader.Size = UDim2.new(1, -10, 0, 30); invHeader.Text = "--- PETS ---"; invHeader.BackgroundTransparency = 1; invHeader.TextColor3 = Color3.fromRGB(200, 200, 0);
-invHeader.Font = Enum.Font.SourceSansBold; invHeader.TextSize = 18; invHeader.TextScaled = isMobile
+invHeader.Font = Enum.Font.SourceSansBold; invHeader.TextSize = 16
 
 petDetails = Instance.new("TextLabel", f4); petDetails.Size = UDim2.new(1, -10, 0, 150); petDetails.BackgroundTransparency = 1;
 petDetails.TextColor3 = Color3.new(1, 1, 1); petDetails.TextXAlignment = Enum.TextXAlignment.Left; petDetails.TextYAlignment = Enum.TextYAlignment.Top;
-petDetails.Text = "Select a Pet to view stats"; petDetails.TextScaled = isMobile
+petDetails.Text = "Select a Pet to view stats"; petDetails.TextSize = 13
 
 basicDD = createDropdown(f4, "Basic Pets", {"Nothing Here"}, false, function(l) states.currentPetLabel = l; states.currentPetTable = "Basic"; handleItemSelection(l, petRefsBasic, petDetails) end)
 advDD = createDropdown(f4, "Advance Pets", {"Nothing Here"}, false, function(l) states.currentPetLabel = l; states.currentPetTable = "Advanced"; handleItemSelection(l, petRefsAdv, petDetails) end)
@@ -921,11 +979,11 @@ epicDD = createDropdown(f4, "Epic Pets", {"Nothing Here"}, false, function(l) st
 uniqueDD = createDropdown(f4, "Unique Pets", {"Nothing Here"}, false, function(l) states.currentPetLabel = l; states.currentPetTable = "Unique"; handleItemSelection(l, petRefsUnique, petDetails) end)
 
 local auraHeader = Instance.new("TextLabel", f4); auraHeader.Size = UDim2.new(1, -10, 0, 30); auraHeader.Text = "--- AURAS ---"; auraHeader.BackgroundTransparency = 1;
-auraHeader.TextColor3 = Color3.fromRGB(200, 0, 200); auraHeader.Font = Enum.Font.SourceSansBold; auraHeader.TextSize = 18; auraHeader.TextScaled = isMobile
+auraHeader.TextColor3 = Color3.fromRGB(200, 0, 200); auraHeader.Font = Enum.Font.SourceSansBold; auraHeader.TextSize = 16
 
 auraDetails = Instance.new("TextLabel", f4); auraDetails.Size = UDim2.new(1, -10, 0, 150);
 auraDetails.BackgroundTransparency = 1; auraDetails.TextColor3 = Color3.new(1, 1, 1); auraDetails.TextXAlignment = Enum.TextXAlignment.Left; auraDetails.TextYAlignment = Enum.TextYAlignment.Top;
-auraDetails.Text = "Select an Aura to view stats"; auraDetails.TextScaled = isMobile
+auraDetails.Text = "Select an Aura to view stats"; auraDetails.TextSize = 13
 
 auraBasicDD = createDropdown(f4, "Basic Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; states.currentAuraTable = "Basic"; handleAuraSelection(l, auraRefsBasic, auraDetails) end)
 auraAdvDD = createDropdown(f4, "Advance Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; states.currentAuraTable = "Advanced"; handleAuraSelection(l, auraRefsAdv, auraDetails) end)
@@ -934,14 +992,149 @@ auraEpicDD = createDropdown(f4, "Epic Auras", {"Nothing Here"}, false, function(
 auraUniqueDD = createDropdown(f4, "Unique Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; states.currentAuraTable = "Unique";
 handleAuraSelection(l, auraRefsUnique, auraDetails) end)
 
-local ultHeader = Instance.new("TextLabel", f4); ultHeader.Size = UDim2.new(1, -10, 0, 25); ultHeader.Text = "--- ULTIMATES ---"; ultHeader.BackgroundTransparency = 1; ultHeader.TextColor3 = Color3.fromRGB(0, 200, 200); ultHeader.Font = Enum.Font.SourceSansBold; ultHeader.TextXAlignment = Enum.TextXAlignment.Left; ultHeader.TextScaled = isMobile
-local ultList = Instance.new("TextLabel", f4); ultList.Size = UDim2.new(1, -10, 0, 250); ultList.BackgroundTransparency = 1; ultList.TextColor3 = Color3.new(1, 1, 1); ultList.TextXAlignment = Enum.TextXAlignment.Left; ultList.TextYAlignment = Enum.TextYAlignment.Top; ultList.Text = "None"; ultList.TextWrapped = true; ultList.AutomaticSize = Enum.AutomaticSize.Y; ultList.TextScaled = isMobile
+local ultHeader = Instance.new("TextLabel", f4); ultHeader.Size = UDim2.new(1, -10, 0, 25); ultHeader.Text = "--- ULTIMATES ---"; ultHeader.BackgroundTransparency = 1; ultHeader.TextColor3 = Color3.fromRGB(0, 200, 200); ultHeader.Font = Enum.Font.SourceSansBold; ultHeader.TextXAlignment = Enum.TextXAlignment.Left; ultHeader.TextSize = 14
+local ultList = Instance.new("TextLabel", f4); ultList.Size = UDim2.new(1, -10, 0, 250); ultList.BackgroundTransparency = 1; ultList.TextColor3 = Color3.new(1, 1, 1); ultList.TextXAlignment = Enum.TextXAlignment.Left; ultList.TextYAlignment = Enum.TextYAlignment.Top; ultList.Text = "None"; ultList.TextWrapped = true; ultList.AutomaticSize = Enum.AutomaticSize.Y; ultList.TextSize = 13
 
-local gpHeader = Instance.new("TextLabel", f4); gpHeader.Size = UDim2.new(1, -10, 0, 25); gpHeader.Text = "--- GAMEPASSES ---"; gpHeader.BackgroundTransparency = 1; gpHeader.TextColor3 = Color3.fromRGB(0, 200, 100); gpHeader.Font = Enum.Font.SourceSansBold; gpHeader.TextXAlignment = Enum.TextXAlignment.Left; gpHeader.TextScaled = isMobile
-local gpList = Instance.new("TextLabel", f4); gpList.Size = UDim2.new(1, -10, 0, 200); gpList.BackgroundTransparency = 1; gpList.TextColor3 = Color3.new(1, 1, 1); gpList.TextXAlignment = Enum.TextXAlignment.Left; gpList.TextYAlignment = Enum.TextYAlignment.Top; gpList.Text = "None"; gpList.TextWrapped = true; gpList.AutomaticSize = Enum.AutomaticSize.Y; gpList.TextScaled = isMobile
+local gpHeader = Instance.new("TextLabel", f4); gpHeader.Size = UDim2.new(1, -10, 0, 25); gpHeader.Text = "--- GAMEPASSES ---"; gpHeader.BackgroundTransparency = 1; gpHeader.TextColor3 = Color3.fromRGB(0, 200, 100); gpHeader.Font = Enum.Font.SourceSansBold; gpHeader.TextXAlignment = Enum.TextXAlignment.Left; gpHeader.TextSize = 14
+local gpList = Instance.new("TextLabel", f4); gpList.Size = UDim2.new(1, -10, 0, 200); gpList.BackgroundTransparency = 1; gpList.TextColor3 = Color3.new(1, 1, 1); gpList.TextXAlignment = Enum.TextXAlignment.Left; gpList.TextYAlignment = Enum.TextYAlignment.Top; gpList.Text = "None"; gpList.TextWrapped = true; gpList.AutomaticSize = Enum.AutomaticSize.Y; gpList.TextSize = 13
 
 ----------------------------------------------------------------
--- TAB 5: AUTO GYM
+-- TAB 5: GLITCHABLE REBIRTH
+----------------------------------------------------------------
+local fGlitch = frames["Glitchable Rebirth"]
+
+-- Exp Gives output visual label declaration
+local expGivesDisplayLabel = Instance.new("TextLabel", fGlitch)
+expGivesDisplayLabel.Size = UDim2.new(1, -10, 0, 30)
+expGivesDisplayLabel.BackgroundTransparency = 1
+expGivesDisplayLabel.TextColor3 = Color3.fromRGB(240, 240, 240)
+expGivesDisplayLabel.Text = "EXP GIVES: N/A"
+expGivesDisplayLabel.TextSize = 14
+expGivesDisplayLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+-- Glitchable output status visual label declaration
+local glitchableDisplayLabel = Instance.new("TextLabel", fGlitch)
+glitchableDisplayLabel.Size = UDim2.new(1, -10, 0, 30)
+glitchableDisplayLabel.BackgroundTransparency = 1
+glitchableDisplayLabel.TextColor3 = Color3.fromRGB(240, 240, 240)
+glitchableDisplayLabel.Text = "GLITCHABLE?: N/A"
+glitchableDisplayLabel.TextSize = 14
+glitchableDisplayLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+-- Rebirth Required calculation output visual label declaration
+local rebirthRequiredDisplayLabel = Instance.new("TextLabel", fGlitch)
+rebirthRequiredDisplayLabel.Size = UDim2.new(1, -10, 0, 30)
+rebirthRequiredDisplayLabel.BackgroundTransparency = 1
+rebirthRequiredDisplayLabel.TextColor3 = Color3.fromRGB(240, 240, 240)
+rebirthRequiredDisplayLabel.Text = "Rebirth Required: None"
+rebirthRequiredDisplayLabel.TextSize = 14
+rebirthRequiredDisplayLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+-- Calculation Button objects declaration early for logical verification triggers
+local calcRebirthExpBtn = Instance.new("TextButton", fGlitch)
+local checkRebirthRequiredBtn = Instance.new("TextButton", fGlitch)
+
+local glitchRockDD = createDropdown(fGlitch, "Rock dropdown", {
+    "Tiny Rock(0.025)",
+    "Punching Rock(0.05)",
+    "Large Rock(0.75)",
+    "Golden Rock(0.2)",
+    "Frozen Rock(0.375)",
+    "Mystic Rock(0.75)",
+    "Inferno Rock(1.125)",
+    "Legends Rock(2.5)",
+    "Muscle King Rock(12.5)",
+    "Jungle Rock(16.25)"
+}, false, function(selectedOption)
+    local baseRockName = selectedOption:gsub("%(.*%)", "")
+    states.selectedGlitchRock = baseRockName
+    states.glitchRockValue = glitchRockValues[baseRockName] or 0
+    
+    -- Dynamically update layout statuses of buttons when selection condition returns valid
+    if states.selectedGlitchRock then
+        calcRebirthExpBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
+        checkRebirthRequiredBtn.BackgroundColor3 = Color3.fromRGB(60, 100, 60)
+    end
+end)
+
+-- Button logic formula execution structural configuration layout
+calcRebirthExpBtn.Size = UDim2.new(1, -10, 0, 35)
+calcRebirthExpBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40) -- Darkened layout status initially
+calcRebirthExpBtn.Text = "Calculate My Rebirth Exp Gives"
+calcRebirthExpBtn.TextColor3 = Color3.new(1, 1, 1)
+calcRebirthExpBtn.TextSize = 14
+
+calcRebirthExpBtn.MouseButton1Click:Connect(function()
+    if not states.selectedGlitchRock then return end -- Ejected if rock dropdown are not selected first
+    
+    local userRebirths = getPlayerRebirths()
+    local rockVal = states.glitchRockValue
+    local calculationResult = (userRebirths + 20) * rockVal
+    states.calculatedExpGives = calculationResult
+    
+    expGivesDisplayLabel.Text = "EXP GIVES: " .. tostring(calculationResult)
+    
+    -- Evaluate decimal logic pattern checks
+    if calculationResult % 1 == 0 then
+        glitchableDisplayLabel.Text = "GLITCHABLE?: YES"
+    else
+        glitchableDisplayLabel.Text = "GLITCHABLE?: NO"
+    end
+end)
+
+-- EXP text box generation configuration filters out negative values, letters, dots and decimals
+local expTextBox = Instance.new("TextBox", fGlitch)
+expTextBox.Size = UDim2.new(1, -10, 0, 35)
+expTextBox.PlaceholderText = "EXP textbox"
+expTextBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+expTextBox.TextColor3 = Color3.new(1, 1, 1)
+expTextBox.TextSize = 14
+
+expTextBox:GetPropertyChangedSignal("Text"):Connect(function()
+    local filteredText = expTextBox.Text:gsub("%D", "") -- Pull out non-digits completely (removes letters, dots, signs)
+    expTextBox.Text = filteredText
+end)
+
+checkRebirthRequiredBtn.Size = UDim2.new(1, -10, 0, 35)
+checkRebirthRequiredBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+checkRebirthRequiredBtn.Text = "Check Rebirth Required"
+checkRebirthRequiredBtn.TextColor3 = Color3.new(1, 1, 1)
+checkRebirthRequiredBtn.TextSize = 14
+
+checkRebirthRequiredBtn.MouseButton1Click:Connect(function()
+    if not states.selectedGlitchRock then return end -- Ejected if rock dropdown are not selected first
+    
+    local inputText = expTextBox.Text
+    if inputText == "" then return end -- Ejected if text field empty
+    
+    local expNum = tonumber(inputText)
+    if not expNum then return end
+    
+    local rockVal = states.glitchRockValue
+    local calculationResult = (expNum / rockVal) - 20
+    
+    if calculationResult % 1 ~= 0 then
+        rebirthRequiredDisplayLabel.Text = "Rebirth Required: DECIMAL NUMBER DETECTED NO RESULT OUT"
+    else
+        rebirthRequiredDisplayLabel.Text = "Rebirth Required: " .. tostring(calculationResult)
+    end
+end)
+
+-- PET EXP text box construction mirroring filtration structural configurations logic patterns
+local petExpTextBox = Instance.new("TextBox", fGlitch)
+petExpTextBox.Size = UDim2.new(1, -10, 0, 35)
+petExpTextBox.PlaceholderText = "PET EXP text box"
+petExpTextBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+petExpTextBox.TextColor3 = Color3.new(1, 1, 1)
+petExpTextBox.TextSize = 14
+
+petExpTextBox:GetPropertyChangedSignal("Text"):Connect(function()
+    local filteredText = petExpTextBox.Text:gsub("%D", "")
+    petExpTextBox.Text = filteredText
+end)
+
+----------------------------------------------------------------
+-- TAB 6: AUTO GYM
 ----------------------------------------------------------------
 local f5 = frames["Auto Gym"]
 
@@ -979,7 +1172,7 @@ gymBtn.Size = UDim2.new(1, -10, 0, 35)
 gymBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
 gymBtn.Text = "Gym"
 gymBtn.TextColor3 = Color3.new(1, 1, 1)
-gymBtn.TextScaled = isMobile
+gymBtn.TextSize = 14
 gymBtn.MouseButton1Click:Connect(function()
     if not states.selectedMap or not states.selectedGym then return end
     local gym = gymData[states.selectedMap][states.selectedGym]
@@ -1008,7 +1201,7 @@ local autoGymBtn = createToggle(f5, "Auto Gym", function(val)
 end)
 
 ----------------------------------------------------------------
--- TAB 6: AUTO CRYSTAL
+-- TAB 7: AUTO CRYSTAL
 ----------------------------------------------------------------
 local f6 = frames["Auto Crystal"]
 
@@ -1024,7 +1217,7 @@ crystalInfoLabel.BackgroundTransparency = 1
 crystalInfoLabel.TextColor3 = Color3.new(1, 1, 1)
 crystalInfoLabel.Text = "No Crystal Selected"
 crystalInfoLabel.TextXAlignment = Enum.TextXAlignment.Center
-crystalInfoLabel.TextScaled = isMobile
+crystalInfoLabel.TextSize = 14
 
 local crystalCostLabel = Instance.new("TextLabel", f6)
 crystalCostLabel.Size = UDim2.new(1, -10, 0, 30)
@@ -1032,7 +1225,7 @@ crystalCostLabel.BackgroundTransparency = 1
 crystalCostLabel.TextColor3 = Color3.fromRGB(0, 230, 100)
 crystalCostLabel.Text = "Cost: N/A"
 crystalCostLabel.TextXAlignment = Enum.TextXAlignment.Center
-crystalCostLabel.TextScaled = isMobile
+crystalCostLabel.TextSize = 14
 
 local filteredCrystals = {}
 local petShopFolder = ReplicatedStorage:FindFirstChild("cPetShopFolder")
@@ -1089,7 +1282,7 @@ buyCrystalBtn.Size = UDim2.new(1, -10, 0, 35)
 buyCrystalBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 150)
 buyCrystalBtn.Text = "Buy Button"
 buyCrystalBtn.TextColor3 = Color3.new(1, 1, 1)
-buyCrystalBtn.TextScaled = isMobile
+buyCrystalBtn.TextSize = 14
 
 buyCrystalBtn.MouseButton1Click:Connect(function()
     if states.selectedCrystal and petShopFolder then
@@ -1120,7 +1313,13 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
         if states.godMode then pcall(function() ReplicatedStorage.rEvents.brawlEvent:FireServer("joinBrawl") end) end
-        if states.autoSize then pcall(function() ReplicatedStorage.rEvents.changeSpeedSizeRemote:InvokeServer("changeSize", tonumber(Config.SizeValue) or 1) end) end
+        if states.autoSize then 
+            if Config.SizeValue == "nan" then
+                pcall(function() ReplicatedStorage.rEvents.changeSpeedSizeRemote:InvokeServer("changeSize", 0/0) end)
+            else
+                pcall(function() ReplicatedStorage.rEvents.changeSpeedSizeRemote:InvokeServer("changeSize", tonumber(Config.SizeValue) or 1) end) 
+            end
+        end
         local char = player.Character;
         if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Humanoid") then
             local root, hum = char.HumanoidRootPart, char.Humanoid
@@ -1294,7 +1493,15 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
 
         if states.selectedMethod == "Teleport" then 
             if punchTool and punchTool:FindFirstChild("attackTime") then punchTool.attackTime.Value = 0.05 end
-            local edgeOffset = (actualRockPart.Size.Z / 2) + 2.5 + ((tonumber(Config.SizeValue) or 1) * 0.25)
+            
+            local mySize = 1
+            if Config.SizeValue == "nan" then
+                mySize = 1
+            else
+                mySize = tonumber(Config.SizeValue) or 1
+            end
+            
+            local edgeOffset = (actualRockPart.Size.Z / 2) + 2.5 + (mySize * 0.25)
             root.CFrame = CFrame.lookAt((actualRockPart.CFrame * CFrame.new(0, 0, edgeOffset)).Position, actualRockPart.Position)
             if punchTool then punchTool:Activate() end
 
@@ -1306,7 +1513,14 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                 if not rockCache[actualRockPart] then 
                     rockCache[actualRockPart] = {Size = actualRockPart.Size, CanCollide = actualRockPart.CanCollide, CFrame = actualRockPart.CFrame} 
                 end
-                local mySize = player:FindFirstChild("customSize") and player.customSize.Value or tonumber(Config.SizeValue) or 1
+                
+                local mySize = 1
+                if Config.SizeValue == "nan" then
+                    mySize = 1
+                else
+                    mySize = player:FindFirstChild("customSize") and player.customSize.Value or tonumber(Config.SizeValue) or 1
+                end
+                
                 local newSize = (mySize >= 2) and 2 or 1
                 actualRockPart.Size = Vector3.new(newSize, newSize, newSize)
                 actualRockPart.CanCollide = false
