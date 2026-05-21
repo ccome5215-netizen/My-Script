@@ -381,7 +381,6 @@ getgenv().ML_Expert_UI = ScreenGui
 local MainFrame = Instance.new("Frame", ScreenGui)
 MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 MainFrame.BorderSizePixel = 0
-MainFrame.Position = UDim2.fromScale(0.3, 0.3)
 MainFrame.Active = true
 makeDraggable(MainFrame)
 
@@ -397,26 +396,29 @@ TitleText.Text = "MUSCLE LEGENDS"
 TitleText.TextColor3 = Color3.new(1, 1, 1)
 TitleText.TextXAlignment = Enum.TextXAlignment.Left
 
-if UserInputService.TouchEnabled then
-    MainFrame.Size = UDim2.fromOffset(300, 320)
+-- Reverted UI Frame scaling engines entirely
+if isMobile then
+    MainFrame.Size = UDim2.fromOffset(420, 340)
+    MainFrame.Position = UDim2.fromScale(0.15, 0.1)
     MainFrame.Visible = false
     local MobileToggle = Instance.new("TextButton", ScreenGui)
     MobileToggle.Size = UDim2.fromOffset(45, 45)
-    MobileToggle.Position = UDim2.fromScale(0.1, 0.1)
+    MobileToggle.Position = UDim2.fromScale(0.05, 0.2)
     MobileToggle.Text = "ML"
     MobileToggle.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
     MobileToggle.TextColor3 = Color3.new(1, 1, 1)
     makeDraggable(MobileToggle)
     MobileToggle.MouseButton1Click:Connect(function() MainFrame.Visible = not MainFrame.Visible end)
 else
-    MainFrame.Size = UDim2.fromOffset(550, 500)
+    MainFrame.Size = UDim2.fromOffset(580, 520)
+    MainFrame.Position = UDim2.fromScale(0.3, 0.2)
     UserInputService.InputBegan:Connect(function(input, gpe)
         if not gpe and input.KeyCode == Enum.KeyCode.Z then MainFrame.Visible = not MainFrame.Visible end
     end)
 end
 
 local TabContainer = Instance.new("Frame", MainFrame)
-TabContainer.Size = UDim2.new(1, 0, 0, 30)
+TabContainer.Size = UDim2.new(1, 0, 0, 35)
 TabContainer.Position = UDim2.fromOffset(0, 30)
 TabContainer.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 
@@ -433,8 +435,8 @@ for i, tName in ipairs(tabs) do
     btn.TextScaled = true
     
     local f = Instance.new("ScrollingFrame", MainFrame)
-    f.Size = UDim2.new(1, -10, 1, -70)
-    f.Position = UDim2.fromOffset(5, 65)
+    f.Size = UDim2.new(1, -10, 1, -75)
+    f.Position = UDim2.fromOffset(5, 70)
     f.BackgroundTransparency = 1
     f.Visible = (i == 1)
     f.CanvasSize = UDim2.new(0, 0, 0, 0)
@@ -442,10 +444,11 @@ for i, tName in ipairs(tabs) do
     f.ScrollingEnabled = true
     f.ClipsDescendants = true
     f.ElasticBehavior = Enum.ElasticBehavior.WhenScrollable
-    f.ScrollBarThickness = isMobile and 6 or 2
+    f.ScrollBarThickness = isMobile and 8 or 4
     
     local layout = Instance.new("UIListLayout", f)
-    layout.Padding = UDim.new(0, 5)
+    layout.Padding = UDim.new(0, 6)
+    layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
   
     frames[tName] = f
     btn.MouseButton1Click:Connect(function()
@@ -454,13 +457,13 @@ for i, tName in ipairs(tabs) do
     end)
 end
 
--- Mobile-only: make the Farm tab properly scrollable
+-- Force scrollable properties on mobile platforms explicitly
 if isMobile then
-    local farmFrame = frames["Farm"]
-    if farmFrame then
-        farmFrame.ScrollingDirection = Enum.ScrollingDirection.Y
-        farmFrame.ScrollBarThickness = 10
-        farmFrame.ScrollBarImageTransparency = 0
+    for _, frame in pairs(frames) do
+        frame.ScrollingDirection = Enum.ScrollingDirection.Y
+        frame.ScrollBarThickness = 10
+        frame.ScrollBarImageTransparency = 0.2
+        frame.ScrollingEnabled = true
     end
 end
 
@@ -470,10 +473,11 @@ end
 local SetToggle = {}
 local function createToggle(parent, text, callback)
     local btn = Instance.new("TextButton", parent)
-    btn.Size = UDim2.new(1, -10, 0, 30)
+    btn.Size = UDim2.new(1, -10, 0, 35)
     btn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
     btn.Text = text .. " [OFF]"
     btn.TextColor3 = Color3.new(1, 1, 1)
+    btn.TextScaled = isMobile
     local state = false
     
     SetToggle[btn] = function(newState)
@@ -492,39 +496,40 @@ end
 
 local function createDropdown(parent, text, options, multi, callback, checkStateFunc)
     local container = Instance.new("Frame", parent)
-    container.Size = UDim2.new(1, -10, 0, 30)
+    container.Size = UDim2.new(1, -10, 0, 35)
     container.BackgroundTransparency = 1
     
     local headerText = Instance.new("TextLabel", container)
-    headerText.Size = UDim2.new(1, 0, 0, 30)
+    headerText.Size = UDim2.new(1, 0, 0, 35)
     headerText.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
     headerText.Text = text .. " v"
     headerText.TextColor3 = Color3.new(1, 1, 1)
+    headerText.TextScaled = isMobile
     headerText.Active = true
     
     -- Hidden button overlay for click detection on the header
     local headerBtn = Instance.new("TextButton", container)
-    headerBtn.Size = UDim2.new(1, 0, 0, 30)
+    headerBtn.Size = UDim2.new(1, 0, 0, 35)
     headerBtn.BackgroundTransparency = 1
     headerBtn.Text = ""
     headerBtn.ZIndex = 12
     
     local list = Instance.new("ScrollingFrame", container)
-    list.Position = UDim2.fromOffset(0, 30)
+    list.Position = UDim2.fromOffset(0, 35)
     list.Visible = false
     list.ZIndex = 10
     list.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-    list.ScrollBarThickness = isMobile and 6 or 4
+    list.ScrollBarThickness = isMobile and 8 or 5
     list.ScrollingEnabled = true
     list.ClipsDescendants = true
     list.ElasticBehavior = Enum.ElasticBehavior.WhenScrollable
     
     headerBtn.MouseButton1Click:Connect(function()
         list.Visible = not list.Visible
-        local listHeight = math.min(#options * 25, 150)
-        container.Size = list.Visible and UDim2.new(1, -10, 0, listHeight + 30) or UDim2.new(1, -10, 0, 30)
+        local listHeight = math.min(#options * 30, 150)
+        container.Size = list.Visible and UDim2.new(1, -10, 0, listHeight + 35) or UDim2.new(1, -10, 0, 35)
         list.Size = UDim2.new(1, 0, 0, listHeight)
-        list.CanvasSize = UDim2.new(0, 0, 0, #options * 25)
+        list.CanvasSize = UDim2.new(0, 0, 0, #options * 30)
     end)
     
     local function refresh(newOpts)
@@ -534,10 +539,11 @@ local function createDropdown(parent, text, options, multi, callback, checkState
         for _, v in ipairs(list:GetChildren()) do v:Destroy() end
         for i, opt in ipairs(options) do
             local o = Instance.new("TextButton", list)
-            o.Size = UDim2.new(1, 0, 0, 25)
-            o.Position = UDim2.fromOffset(0, (i-1)*25)
+            o.Size = UDim2.new(1, 0, 0, 30)
+            o.Position = UDim2.fromOffset(0, (i-1)*30)
             o.Text = tostring(opt)
             o.TextColor3 = Color3.new(1, 1, 1)
+            o.TextScaled = isMobile
             o.ZIndex = 11
             
             if multi and checkStateFunc then
@@ -551,7 +557,7 @@ local function createDropdown(parent, text, options, multi, callback, checkState
                 if not multi then
                     headerText.Text = tostring(opt) .. " v"
                     list.Visible = false
-                    container.Size = UDim2.new(1, -10, 0, 30)
+                    container.Size = UDim2.new(1, -10, 0, 35)
                     callback(opt)
                 else
                     local newState = callback(opt)
@@ -559,12 +565,12 @@ local function createDropdown(parent, text, options, multi, callback, checkState
                 end
             end)
         end
-        local listHeight = math.min(#options * 25, 150)
+        local listHeight = math.min(#options * 30, 150)
         if list.Visible then
-            container.Size = UDim2.new(1, -10, 0, listHeight + 30)
+            container.Size = UDim2.new(1, -10, 0, listHeight + 35)
             list.Size = UDim2.new(1, 0, 0, listHeight)
         end
-        list.CanvasSize = UDim2.new(0, 0, 0, #options * 25)
+        list.CanvasSize = UDim2.new(0, 0, 0, #options * 30)
     end
     refresh()
     return { refresh = refresh, setHeaderText = function(txt) headerText.Text = txt end }
@@ -631,7 +637,7 @@ createToggle(f1, "Auto Glitch", function(val)
 end)
 
 local timerLabel = Instance.new("TextLabel", f1)
-timerLabel.Size = UDim2.new(1, -10, 0, 20); timerLabel.BackgroundTransparency = 1; timerLabel.TextColor3 = Color3.fromRGB(200, 200, 200); timerLabel.Text = "Glitch Timer: 00:00:00:00"
+timerLabel.Size = UDim2.new(1, -10, 0, 25); timerLabel.BackgroundTransparency = 1; timerLabel.TextColor3 = Color3.fromRGB(200, 200, 200); timerLabel.Text = "Glitch Timer: 00:00:00:00"; timerLabel.TextScaled = isMobile
 
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while task.wait(1) do
@@ -665,7 +671,7 @@ local toolDD = createDropdown(f1, "Tool Dropdown", toolOptions, false, function(
 createToggle(f1, "Auto Equip Tool", function(v) if v and (not states.selectedTool or states.selectedTool == "NO TOOL FOUND") then return false end; states.autoEquip = v end)
 
 local rebBox = Instance.new("TextBox", f1)
-rebBox.Size = UDim2.new(1, -10, 0, 30); rebBox.Text = Config.RebirthTarget; rebBox.PlaceholderText = "Rebirth Target"; rebBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); rebBox.TextColor3 = Color3.new(1, 1, 1)
+rebBox.Size = UDim2.new(1, -10, 0, 35); rebBox.Text = Config.RebirthTarget; rebBox.PlaceholderText = "Rebirth Target"; rebBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); rebBox.TextColor3 = Color3.new(1, 1, 1); rebBox.TextScaled = isMobile
 rebBox.FocusLost:Connect(function() Config.RebirthTarget = rebBox.Text; SaveConfig() end)
 
 autoRebirthTargetBtn = createToggle(f1, "Auto Rebirth Target", function(v)
@@ -690,27 +696,27 @@ end)
 createToggle(f1, "Fast Punch", function(val) states.fastPunch = val; local p = getPunch(); if p and p:FindFirstChild("attackTime") then p.attackTime.Value = val and 0 or 0.35 end end)
 
 ----------------------------------------------------------------
--- TAB 2: FARM
+-- TAB 2: FARM (Scrolling Logic Restored)
 ----------------------------------------------------------------
 local f2 = frames["Farm"]
 createToggle(f2, "Less Lag", function(val) states.lessLag = val end)
 
 local sizeBox = Instance.new("TextBox", f2)
-sizeBox.Size = UDim2.new(1, -10, 0, 30); sizeBox.Text = Config.SizeValue; sizeBox.PlaceholderText = "Size Value"; sizeBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); sizeBox.TextColor3 = Color3.new(1, 1, 1)
+sizeBox.Size = UDim2.new(1, -10, 0, 35); sizeBox.Text = Config.SizeValue; sizeBox.PlaceholderText = "Size Value"; sizeBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); sizeBox.TextColor3 = Color3.new(1, 1, 1); sizeBox.TextScaled = isMobile
 sizeBox:GetPropertyChangedSignal("Text"):Connect(function() sizeBox.Text = sizeBox.Text:gsub("%D", "") end)
 sizeBox.FocusLost:Connect(function() local num = tonumber(sizeBox.Text); if not num or num < 1 then sizeBox.Text = "1" elseif num > 100 then sizeBox.Text = "100" else sizeBox.Text = tostring(math.floor(num)) end; Config.SizeValue = sizeBox.Text; SaveConfig() end)
 
 createToggle(f2, "Auto Size Toggle", function(v) states.autoSize = v end)
 
 local wsBox = Instance.new("TextBox", f2)
-wsBox.Size = UDim2.new(1, -10, 0, 30); wsBox.Text = Config.WalkSpeed or "16"; wsBox.PlaceholderText = "WalkSpeed"; wsBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); wsBox.TextColor3 = Color3.new(1, 1, 1)
+wsBox.Size = UDim2.new(1, -10, 0, 35); wsBox.Text = Config.WalkSpeed or "16"; wsBox.PlaceholderText = "WalkSpeed"; wsBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); wsBox.TextColor3 = Color3.new(1, 1, 1); wsBox.TextScaled = isMobile
 wsBox:GetPropertyChangedSignal("Text"):Connect(function() wsBox.Text = wsBox.Text:gsub("%D", "") end)
 wsBox.FocusLost:Connect(function() local num = tonumber(wsBox.Text); if not num or num < 1 then wsBox.Text = "16" else wsBox.Text = tostring(math.floor(num)) end; Config.WalkSpeed = wsBox.Text; SaveConfig() end)
 
 createToggle(f2, "Auto WalkSpeed", function(v) states.autoWalkSpeed = v end)
 
 local flySpeedBox = Instance.new("TextBox", f2)
-flySpeedBox.Size = UDim2.new(1, -10, 0, 30); flySpeedBox.Text = Config.FlySpeed or "50"; flySpeedBox.PlaceholderText = "Fly Speed"; flySpeedBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); flySpeedBox.TextColor3 = Color3.new(1, 1, 1)
+flySpeedBox.Size = UDim2.new(1, -10, 0, 35); flySpeedBox.Text = Config.FlySpeed or "50"; flySpeedBox.PlaceholderText = "Fly Speed"; flySpeedBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); flySpeedBox.TextColor3 = Color3.new(1, 1, 1); flySpeedBox.TextScaled = isMobile
 flySpeedBox:GetPropertyChangedSignal("Text"):Connect(function() flySpeedBox.Text = flySpeedBox.Text:gsub("%D", "") end)
 flySpeedBox.FocusLost:Connect(function() Config.FlySpeed = flySpeedBox.Text; SaveConfig() end)
 
@@ -727,18 +733,18 @@ end)
 createToggle(f2, "God Mode", function(v) states.godMode = v end)
 
 local copyPosBtn = Instance.new("TextButton", f2)
-copyPosBtn.Size = UDim2.new(1, -10, 0, 35); copyPosBtn.Text = "Copy My Position"; copyPosBtn.BackgroundColor3 = Color3.fromRGB(40, 60, 60); copyPosBtn.TextColor3 = Color3.new(1, 1, 1)
+copyPosBtn.Size = UDim2.new(1, -10, 0, 35); copyPosBtn.Text = "Copy My Position"; copyPosBtn.BackgroundColor3 = Color3.fromRGB(40, 60, 60); copyPosBtn.TextColor3 = Color3.new(1, 1, 1); copyPosBtn.TextScaled = isMobile
 copyPosBtn.MouseButton1Click:Connect(function() if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then local pos = player.Character.HumanoidRootPart.Position; pcall(function() setclipboard(string.format("%f, %f, %f", pos.X, pos.Y, pos.Z)) end) end end)
 
 local snackBtn = Instance.new("TextButton", f2)
-snackBtn.Size = UDim2.new(1, -10, 0, 35); snackBtn.Text = "Eat All Snacks"; snackBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40); snackBtn.TextColor3 = Color3.new(1, 1, 1)
+snackBtn.Size = UDim2.new(1, -10, 0, 35); snackBtn.Text = "Eat All Snacks"; snackBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40); snackBtn.TextColor3 = Color3.new(1, 1, 1); snackBtn.TextScaled = isMobile
 snackBtn.MouseButton1Click:Connect(function()
     local skip = {Weight=1, Punch=1, ["Ground Slam"]=1, Stomp=1, Handstands=1, Situps=1, Pushups=1}; local char = player.Character; if not char then return end; local snacksToEat = {}; for _, t in ipairs(player.Backpack:GetChildren()) do if t:IsA("Tool") and not skip[t.Name] then table.insert(snacksToEat, t) end end; for _, t in ipairs(snacksToEat) do t.Parent = char; t:Activate() end; task.wait(); for _, t in ipairs(snacksToEat) do t.Parent = player.Backpack end
 end)
 
 lockPosBtn = createToggle(f2, "Lock Position", function(val) if states.autoMuscleKing and val then return false end; if val and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then states.lockedPos = player.Character.HumanoidRootPart.CFrame else states.lockedPos = nil end; return val end)
-local smallHopBtn = Instance.new("TextButton", f2); smallHopBtn.Size = UDim2.new(1, -10, 0, 35); smallHopBtn.Text = "Small Server Hop"; smallHopBtn.BackgroundColor3 = Color3.fromRGB(40, 60, 60); smallHopBtn.TextColor3 = Color3.new(1, 1, 1); smallHopBtn.MouseButton1Click:Connect(function() ServerHop("Small") end)
-local largeHopBtn = Instance.new("TextButton", f2); largeHopBtn.Size = UDim2.new(1, -10, 0, 35); largeHopBtn.Text = "Large Server Hop"; largeHopBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40); largeHopBtn.TextColor3 = Color3.new(1, 1, 1); largeHopBtn.MouseButton1Click:Connect(function() ServerHop("Large") end)
+local smallHopBtn = Instance.new("TextButton", f2); smallHopBtn.Size = UDim2.new(1, -10, 0, 35); smallHopBtn.Text = "Small Server Hop"; smallHopBtn.BackgroundColor3 = Color3.fromRGB(40, 60, 60); smallHopBtn.TextColor3 = Color3.new(1, 1, 1); smallHopBtn.TextScaled = isMobile; smallHopBtn.MouseButton1Click:Connect(function() ServerHop("Small") end)
+local largeHopBtn = Instance.new("TextButton", f2); largeHopBtn.Size = UDim2.new(1, -10, 0, 35); largeHopBtn.Text = "Large Server Hop"; largeHopBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40); largeHopBtn.TextColor3 = Color3.new(1, 1, 1); largeHopBtn.TextScaled = isMobile; largeHopBtn.MouseButton1Click:Connect(function() ServerHop("Large") end)
 
 ----------------------------------------------------------------
 -- TAB 3: KILLER
@@ -883,30 +889,30 @@ end)
 Players.PlayerRemoving:Connect(function(plr) if states.statsTarget == plr.Name then resetStatsUI() end end)
 
 trackBtn = Instance.new("TextButton", f4)
-trackBtn.Size = UDim2.new(1, -10, 0, 30); trackBtn.Text = "Track Stats"; trackBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50); trackBtn.TextColor3 = Color3.new(1, 1, 1)
+trackBtn.Size = UDim2.new(1, -10, 0, 35); trackBtn.Text = "Track Stats"; trackBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50); trackBtn.TextColor3 = Color3.new(1, 1, 1); trackBtn.TextScaled = isMobile
 trackBtn.MouseButton1Click:Connect(function() if states.statsTarget then states.trackStats = true; trackBtn.BackgroundColor3 = Color3.fromRGB(0, 100, 150) end end)
 
 createToggle(f4, "Without Format Number", function(v) states.withoutFormatNum = v end)
 
 local tpToPlayerBtn = Instance.new("TextButton", f4)
-tpToPlayerBtn.Size = UDim2.new(1, -10, 0, 30); tpToPlayerBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 60); tpToPlayerBtn.Text = "Teleport Player"; tpToPlayerBtn.TextColor3 = Color3.new(1, 1, 1)
+tpToPlayerBtn.Size = UDim2.new(1, -10, 0, 35); tpToPlayerBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 60); tpToPlayerBtn.Text = "Teleport Player"; tpToPlayerBtn.TextColor3 = Color3.new(1, 1, 1); tpToPlayerBtn.TextScaled = isMobile
 tpToPlayerBtn.MouseButton1Click:Connect(function() if states.statsTarget then local tp = Players:FindFirstChild(states.statsTarget); if tp and tp.Character and tp.Character:FindFirstChild("HumanoidRootPart") and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then player.Character.HumanoidRootPart.CFrame = tp.Character.HumanoidRootPart.CFrame end end end)
 
 local statNamesList = {"Strength", "Durability", "Agility", "Rebirth", "Rebirth Multiplier", "Brawl", "Kill", "Gems", "Brawl Kill", "Size", "Speed", "Good Karma", "Evil Karma", "Auto Lift", "Muscle King Time", "Save Size", "Save Speed", "Current Map"}
 local statsDisp = {}
 for _, s in ipairs(statNamesList) do local l = Instance.new("TextLabel", f4);
-l.Size = UDim2.new(1, -10, 0, 20); l.Text = s .. ": None"; l.BackgroundTransparency = 1; l.TextColor3 = Color3.new(1, 1, 1);
-l.TextXAlignment = Enum.TextXAlignment.Left; statsDisp[s] = l end
+l.Size = UDim2.new(1, -10, 0, 25); l.Text = s .. ": None"; l.BackgroundTransparency = 1; l.TextColor3 = Color3.new(1, 1, 1);
+l.TextXAlignment = Enum.TextXAlignment.Left; l.TextScaled = isMobile; statsDisp[s] = l end
 
 createToggle(f4, "View Player", function(val) states.viewing = val; if not val and player.Character and player.Character:FindFirstChild("Humanoid") then workspace.CurrentCamera.CameraSubject = player.Character.Humanoid end end)
 
 local invHeader = Instance.new("TextLabel", f4);
-invHeader.Size = UDim2.new(1, -10, 0, 25); invHeader.Text = "--- PETS ---"; invHeader.BackgroundTransparency = 1; invHeader.TextColor3 = Color3.fromRGB(200, 200, 0);
-invHeader.Font = Enum.Font.SourceSansBold; invHeader.TextSize = 18
+invHeader.Size = UDim2.new(1, -10, 0, 30); invHeader.Text = "--- PETS ---"; invHeader.BackgroundTransparency = 1; invHeader.TextColor3 = Color3.fromRGB(200, 200, 0);
+invHeader.Font = Enum.Font.SourceSansBold; invHeader.TextSize = 18; invHeader.TextScaled = isMobile
 
-petDetails = Instance.new("TextLabel", f4); petDetails.Size = UDim2.new(1, -10, 0, 140); petDetails.BackgroundTransparency = 1;
+petDetails = Instance.new("TextLabel", f4); petDetails.Size = UDim2.new(1, -10, 0, 150); petDetails.BackgroundTransparency = 1;
 petDetails.TextColor3 = Color3.new(1, 1, 1); petDetails.TextXAlignment = Enum.TextXAlignment.Left; petDetails.TextYAlignment = Enum.TextYAlignment.Top;
-petDetails.Text = "Select a Pet to view stats"
+petDetails.Text = "Select a Pet to view stats"; petDetails.TextScaled = isMobile
 
 basicDD = createDropdown(f4, "Basic Pets", {"Nothing Here"}, false, function(l) states.currentPetLabel = l; states.currentPetTable = "Basic"; handleItemSelection(l, petRefsBasic, petDetails) end)
 advDD = createDropdown(f4, "Advance Pets", {"Nothing Here"}, false, function(l) states.currentPetLabel = l; states.currentPetTable = "Advanced"; handleItemSelection(l, petRefsAdv, petDetails) end)
@@ -914,12 +920,12 @@ rareDD = createDropdown(f4, "Rare Pets", {"Nothing Here"}, false, function(l) st
 epicDD = createDropdown(f4, "Epic Pets", {"Nothing Here"}, false, function(l) states.currentPetLabel = l; states.currentPetTable = "Epic"; handleItemSelection(l, petRefsEpic, petDetails) end)
 uniqueDD = createDropdown(f4, "Unique Pets", {"Nothing Here"}, false, function(l) states.currentPetLabel = l; states.currentPetTable = "Unique"; handleItemSelection(l, petRefsUnique, petDetails) end)
 
-local auraHeader = Instance.new("TextLabel", f4); auraHeader.Size = UDim2.new(1, -10, 0, 25); auraHeader.Text = "--- AURAS ---"; auraHeader.BackgroundTransparency = 1;
-auraHeader.TextColor3 = Color3.fromRGB(200, 0, 200); auraHeader.Font = Enum.Font.SourceSansBold; auraHeader.TextSize = 18
+local auraHeader = Instance.new("TextLabel", f4); auraHeader.Size = UDim2.new(1, -10, 0, 30); auraHeader.Text = "--- AURAS ---"; auraHeader.BackgroundTransparency = 1;
+auraHeader.TextColor3 = Color3.fromRGB(200, 0, 200); auraHeader.Font = Enum.Font.SourceSansBold; auraHeader.TextSize = 18; auraHeader.TextScaled = isMobile
 
-auraDetails = Instance.new("TextLabel", f4); auraDetails.Size = UDim2.new(1, -10, 0, 140);
+auraDetails = Instance.new("TextLabel", f4); auraDetails.Size = UDim2.new(1, -10, 0, 150);
 auraDetails.BackgroundTransparency = 1; auraDetails.TextColor3 = Color3.new(1, 1, 1); auraDetails.TextXAlignment = Enum.TextXAlignment.Left; auraDetails.TextYAlignment = Enum.TextYAlignment.Top;
-auraDetails.Text = "Select an Aura to view stats"
+auraDetails.Text = "Select an Aura to view stats"; auraDetails.TextScaled = isMobile
 
 auraBasicDD = createDropdown(f4, "Basic Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; states.currentAuraTable = "Basic"; handleAuraSelection(l, auraRefsBasic, auraDetails) end)
 auraAdvDD = createDropdown(f4, "Advance Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; states.currentAuraTable = "Advanced"; handleAuraSelection(l, auraRefsAdv, auraDetails) end)
@@ -928,25 +934,23 @@ auraEpicDD = createDropdown(f4, "Epic Auras", {"Nothing Here"}, false, function(
 auraUniqueDD = createDropdown(f4, "Unique Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; states.currentAuraTable = "Unique";
 handleAuraSelection(l, auraRefsUnique, auraDetails) end)
 
-local ultHeader = Instance.new("TextLabel", f4); ultHeader.Size = UDim2.new(1, -10, 0, 20); ultHeader.Text = "--- ULTIMATES ---"; ultHeader.BackgroundTransparency = 1; ultHeader.TextColor3 = Color3.fromRGB(0, 200, 200); ultHeader.Font = Enum.Font.SourceSansBold; ultHeader.TextXAlignment = Enum.TextXAlignment.Left
-local ultList = Instance.new("TextLabel", f4); ultList.Size = UDim2.new(1, -10, 0, 250); ultList.BackgroundTransparency = 1; ultList.TextColor3 = Color3.new(1, 1, 1); ultList.TextXAlignment = Enum.TextXAlignment.Left; ultList.TextYAlignment = Enum.TextYAlignment.Top; ultList.Text = "None"; ultList.TextWrapped = true; ultList.AutomaticSize = Enum.AutomaticSize.Y
+local ultHeader = Instance.new("TextLabel", f4); ultHeader.Size = UDim2.new(1, -10, 0, 25); ultHeader.Text = "--- ULTIMATES ---"; ultHeader.BackgroundTransparency = 1; ultHeader.TextColor3 = Color3.fromRGB(0, 200, 200); ultHeader.Font = Enum.Font.SourceSansBold; ultHeader.TextXAlignment = Enum.TextXAlignment.Left; ultHeader.TextScaled = isMobile
+local ultList = Instance.new("TextLabel", f4); ultList.Size = UDim2.new(1, -10, 0, 250); ultList.BackgroundTransparency = 1; ultList.TextColor3 = Color3.new(1, 1, 1); ultList.TextXAlignment = Enum.TextXAlignment.Left; ultList.TextYAlignment = Enum.TextYAlignment.Top; ultList.Text = "None"; ultList.TextWrapped = true; ultList.AutomaticSize = Enum.AutomaticSize.Y; ultList.TextScaled = isMobile
 
-local gpHeader = Instance.new("TextLabel", f4); gpHeader.Size = UDim2.new(1, -10, 0, 20); gpHeader.Text = "--- GAMEPASSES ---"; gpHeader.BackgroundTransparency = 1; gpHeader.TextColor3 = Color3.fromRGB(0, 200, 100); gpHeader.Font = Enum.Font.SourceSansBold; gpHeader.TextXAlignment = Enum.TextXAlignment.Left
-local gpList = Instance.new("TextLabel", f4); gpList.Size = UDim2.new(1, -10, 0, 200); gpList.BackgroundTransparency = 1; gpList.TextColor3 = Color3.new(1, 1, 1); gpList.TextXAlignment = Enum.TextXAlignment.Left; gpList.TextYAlignment = Enum.TextYAlignment.Top; gpList.Text = "None"; gpList.TextWrapped = true; gpList.AutomaticSize = Enum.AutomaticSize.Y
+local gpHeader = Instance.new("TextLabel", f4); gpHeader.Size = UDim2.new(1, -10, 0, 25); gpHeader.Text = "--- GAMEPASSES ---"; gpHeader.BackgroundTransparency = 1; gpHeader.TextColor3 = Color3.fromRGB(0, 200, 100); gpHeader.Font = Enum.Font.SourceSansBold; gpHeader.TextXAlignment = Enum.TextXAlignment.Left; gpHeader.TextScaled = isMobile
+local gpList = Instance.new("TextLabel", f4); gpList.Size = UDim2.new(1, -10, 0, 200); gpList.BackgroundTransparency = 1; gpList.TextColor3 = Color3.new(1, 1, 1); gpList.TextXAlignment = Enum.TextXAlignment.Left; gpList.TextYAlignment = Enum.TextYAlignment.Top; gpList.Text = "None"; gpList.TextWrapped = true; gpList.AutomaticSize = Enum.AutomaticSize.Y; gpList.TextScaled = isMobile
 
 ----------------------------------------------------------------
 -- TAB 5: AUTO GYM
 ----------------------------------------------------------------
 local f5 = frames["Auto Gym"]
 
--- Ordering the dropdowns Map first, then Gym
 local mapDD
 local gymDD
 
 mapDD = createDropdown(f5, "Select Map", {"Tiny Island", "Beach", "Legend Beach", "Frozen Island", "Mystic Island", "Inferno Island", "Legend Island", "Muscle King Island", "Jungle Island"}, false, function(map)
     states.selectedMap = map
     states.selectedGym = nil
-    -- Build gym list with cost strings
     local gymOptions = {}
     local data = gymData[map]
     if data then
@@ -966,17 +970,16 @@ end)
 
 gymDD = createDropdown(f5, "Select Gym", {"Select map first"}, false, function(gymName)
     if not states.selectedMap or gymName == "Select map first" or gymName == "No gyms available" then return end
-    -- Extract real gym name (strip cost)
     local realName = gymName:gsub(" %(.*%)", "")
     states.selectedGym = realName
 end)
 
--- Gym button (one-time)
 local gymBtn = Instance.new("TextButton", f5)
 gymBtn.Size = UDim2.new(1, -10, 0, 35)
 gymBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
 gymBtn.Text = "Gym"
 gymBtn.TextColor3 = Color3.new(1, 1, 1)
+gymBtn.TextScaled = isMobile
 gymBtn.MouseButton1Click:Connect(function()
     if not states.selectedMap or not states.selectedGym then return end
     local gym = gymData[states.selectedMap][states.selectedGym]
@@ -984,17 +987,16 @@ gymBtn.MouseButton1Click:Connect(function()
     local cost = gym.cost
     if cost and getStrength() < cost then return end
     if states.selectedMap == "Muscle King Island" and not isLocalPlayerMuscleKing() then return end
-    local char = player.Character
+    local chr = player.Character
     if not chr or not chr:FindFirstChild("HumanoidRootPart") then return end
     local hum = chr:FindFirstChild("Humanoid")
-    if hum and hum.Sit then return end -- IGNORE TELEPORT IF SITTING
+    if hum and hum.Sit then return end 
     
     chr.HumanoidRootPart.CFrame = CFrame.new(gym.pos)
     chr.HumanoidRootPart.AssemblyLinearVelocity = Vector3.zero
     fireEKey()
 end)
 
--- Auto Gym toggle (now includes continuous repeat)
 local autoGymBtn = createToggle(f5, "Auto Gym", function(val)
     if val then
         if not states.selectedMap or not states.selectedGym then return false end
@@ -1010,14 +1012,39 @@ end)
 ----------------------------------------------------------------
 local f6 = frames["Auto Crystal"]
 
--- Gather filtered lists from cPetShopFolder (One-time dynamic scan)
+-- Output Info Display Elements
+local crystalImageLabel = Instance.new("ImageLabel", f6)
+crystalImageLabel.Size = UDim2.fromOffset(60, 60)
+crystalImageLabel.BackgroundTransparency = 1
+crystalImageLabel.Image = ""
+
+local crystalInfoLabel = Instance.new("TextLabel", f6)
+crystalInfoLabel.Size = UDim2.new(1, -10, 0, 45)
+crystalInfoLabel.BackgroundTransparency = 1
+crystalInfoLabel.TextColor3 = Color3.new(1, 1, 1)
+crystalInfoLabel.Text = "No Crystal Selected"
+crystalInfoLabel.TextXAlignment = Enum.TextXAlignment.Center
+crystalInfoLabel.TextScaled = isMobile
+
+local crystalCostLabel = Instance.new("TextLabel", f6)
+crystalCostLabel.Size = UDim2.new(1, -10, 0, 30)
+crystalCostLabel.BackgroundTransparency = 1
+crystalCostLabel.TextColor3 = Color3.fromRGB(0, 230, 100)
+crystalCostLabel.Text = "Cost: N/A"
+crystalCostLabel.TextXAlignment = Enum.TextXAlignment.Center
+crystalCostLabel.TextScaled = isMobile
+
 local filteredCrystals = {}
 local petShopFolder = ReplicatedStorage:FindFirstChild("cPetShopFolder")
 
 if petShopFolder then
     for _, child in ipairs(petShopFolder:GetChildren()) do
-        local lowerName = string.lower(child.Name)
-        if not string.find(lowerName, "token") then
+        local priceTypeObj = child:FindFirstChild("PriceType") or (child:FindFirstChild("priceValue") and child.priceValue:FindFirstChild("PriceType"))
+        local isToken = false
+        if priceTypeObj and priceTypeObj:IsA("StringValue") and priceTypeObj.Value == "Tokens" then
+            isToken = true
+        end
+        if not isToken then
             table.insert(filteredCrystals, child.Name)
         end
     end
@@ -1027,21 +1054,42 @@ if #filteredCrystals == 0 then
     table.insert(filteredCrystals, "No Crystals Found")
 end
 
--- Crystal List Dropdown setup
 local crystalDD = createDropdown(f6, "Pet/Aura Dropdown", filteredCrystals, false, function(crystalName)
     if crystalName ~= "No Crystals Found" then
         states.selectedCrystal = crystalName
+        local targetObject = petShopFolder and petShopFolder:FindFirstChild(crystalName)
+        if targetObject then
+            -- Fetch values from item inside shop folder
+            local imgIdObj = targetObject:FindFirstChild("imageValue") or targetObject:FindFirstChild("ImageValue")
+            local rarityObj = targetObject:FindFirstChild("rarityValue") or targetObject:FindFirstChild("RarityValue")
+            local priceObj = targetObject:FindFirstChild("priceValue") or targetObject:FindFirstChild("PriceValue")
+            
+            local imgId = imgIdObj and imgIdObj.Value or ""
+            local rarityVal = rarityObj and rarityObj.Value or "Unknown"
+            local priceVal = priceObj and priceObj.Value or 0
+
+            crystalImageLabel.Image = "rbxassetid://" .. tostring(imgId)
+            crystalInfoLabel.Text = crystalName .. " | Rarity: " .. tostring(rarityVal)
+            crystalCostLabel.Text = "Cost: " .. formatNum(priceVal)
+        else
+            crystalImageLabel.Image = ""
+            crystalInfoLabel.Text = "N/A"
+            crystalCostLabel.Text = "Cost: N/A"
+        end
     else
         states.selectedCrystal = nil
+        crystalImageLabel.Image = ""
+        crystalInfoLabel.Text = "N/A"
+        crystalCostLabel.Text = "Cost: N/A"
     end
 end)
 
--- Buy Button implementation
 local buyCrystalBtn = Instance.new("TextButton", f6)
 buyCrystalBtn.Size = UDim2.new(1, -10, 0, 35)
 buyCrystalBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 150)
 buyCrystalBtn.Text = "Buy Button"
 buyCrystalBtn.TextColor3 = Color3.new(1, 1, 1)
+buyCrystalBtn.TextScaled = isMobile
 
 buyCrystalBtn.MouseButton1Click:Connect(function()
     if states.selectedCrystal and petShopFolder then
@@ -1060,7 +1108,6 @@ end)
 ----------------------------------------------------------------
 -- MAIN LOOPS
 ----------------------------------------------------------------
--- Position lock / Auto Muscle King (Heartbeat based to prevent lag)
 table.insert(getgenv().ML_Expert_Loops, RunService.Heartbeat:Connect(function()
     local char = player.Character; if char and char:FindFirstChild("HumanoidRootPart") then
         local root = char.HumanoidRootPart
@@ -1069,7 +1116,6 @@ table.insert(getgenv().ML_Expert_Loops, RunService.Heartbeat:Connect(function()
     end
 end))
 
--- God mode, size, fly, walkspeed (respects Less Lag)
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
@@ -1115,10 +1161,9 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Weight Glue Logic (Background Loop - Always active when holding Weight)
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
-        task.wait() -- No delay
+        task.wait() 
         local char = player.Character
         if not char then continue end
         local tool = char:FindFirstChild("Weight")
@@ -1140,7 +1185,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                 end
             end
         else
-            -- If not holding weight or not finding it in char, clean up glue if it somehow got stuck on a handle in backpack
             local bp = player:FindFirstChild("Backpack")
             if bp then
                 for _, t in ipairs(bp:GetChildren()) do
@@ -1157,8 +1201,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Auto Equip Tool (waits for backpack and character without breaking loop)
--- FIXED: No longer unequips tools when Auto Equip is OFF
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
@@ -1174,21 +1216,18 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             targetTool = bp:FindFirstChild(states.selectedTool) or char:FindFirstChild(states.selectedTool)
         end
         
-        -- Logic: If Auto Equip is ON
         if states.autoEquip then
             if targetTool then
                 if targetTool.Parent ~= char then 
                     pcall(function() if hum then hum:EquipTool(targetTool) else targetTool.Parent = char end end)
                 end
             else
-                -- If the target tool we want isn't found, default to Weight if we have it
                 local weightTool = bp:FindFirstChild("Weight") or char:FindFirstChild("Weight")
                 if weightTool and weightTool.Parent ~= char then
                     pcall(function() if hum then hum:EquipTool(weightTool) else weightTool.Parent = char end end)
                 end
             end
             
-            -- If Auto Equip is ON, unequip everything else except what we want to hold AND Punch
             if not states.autoGlitchTrain then
                 local currentDesired = (targetTool and targetTool.Name) or "Weight"
                 for _, t in ipairs(char:GetChildren()) do
@@ -1198,11 +1237,9 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                 end
             end
         end
-        -- Auto Equip OFF → do nothing; tools are managed by the dedicated glitch loop only when Auto Glitch is ON
     end
 end))
 
--- Anti-drop tools
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     local allowedTools = {["Punch"]=true, ["Weight"]=true, ["Stomp"]=true, 
     ["Ground Slam"]=true, ["Pushups"]=true, ["Handstands"]=true, ["Situps"]=true}
@@ -1233,7 +1270,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
 end))
 
 -- ================================
--- DEDICATED AUTO GLITCH LOOP (ALWAYS task.wait() – NO DELAY)
+-- DEDICATED AUTO GLITCH LOOP
 -- ================================
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
@@ -1274,7 +1311,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                 actualRockPart.Size = Vector3.new(newSize, newSize, newSize)
                 actualRockPart.CanCollide = false
                 actualRockPart.CFrame = targetHand.CFrame
-                -- NonTeleport no longer edits the originalPosition value
             end
             pcall(function()
                 local args1 = { [1] = "punch", [2] = "leftHand" }
@@ -1284,7 +1320,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             end)
         end
 
-        -- If Auto Glitch Train is OFF, stop and unequip other tools (keep Punch)
         if not states.autoGlitchTrain then 
             for _, tool in ipairs(char:GetChildren()) do 
                 if tool:IsA("Tool") and tool.Name ~= "Punch" then 
@@ -1299,7 +1334,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
 end))
 
 -- ================================
--- KILL LOGIC (respects Less Lag) – ALL EXCEPT HANDS
+-- KILL LOGIC – ALL EXCEPT HANDS
 -- ================================
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
@@ -1323,7 +1358,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                         
                         if shouldKill and not states.whitelist[p.Name] then 
                             for _, part in ipairs(p.Character:GetDescendants()) do
-                                -- Teleport all BaseParts except Hands/Arms
                                 if part:IsA("BasePart") and not string.match(part.Name:lower(), "hand") and not string.match(part.Name:lower(), "arm") then
                                     pcall(function()
                                         part.CFrame = myHand.CFrame * CFrame.new(0, 0, -3)
