@@ -1783,6 +1783,7 @@ end))
 
 -- ================================
 -- KILL LOGIC (UPDATED: TELEPORT HEAD TO RIGHT HAND + REMOTE PUNCH)
+-- REMOVED AUTOMATIC PUNCH EQUIP
 -- ================================
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
