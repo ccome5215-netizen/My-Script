@@ -489,7 +489,8 @@ TitleText.TextColor3 = Color3.new(1, 1, 1)
 TitleText.TextXAlignment = Enum.TextXAlignment.Left
 
 if UserInputService.TouchEnabled then
-    MainFrame.Size = UDim2.fromOffset(350, 400)
+    -- MOBILE: Smaller GUI and horizontal scrolling tabs
+    MainFrame.Size = UDim2.fromOffset(320, 380)
     MainFrame.Visible = false
     local MobileToggle = Instance.new("TextButton", ScreenGui)
     MobileToggle.Size = UDim2.fromOffset(45, 45)
@@ -513,7 +514,7 @@ MainContent.Position = UDim2.fromOffset(0, 30)
 MainContent.BackgroundTransparency = 1
 
 -- Left sidebar panel
-local leftWidth = isMobile and 80 or 120
+local leftWidth = isMobile and 70 or 120
 local LeftPanel = Instance.new("Frame", MainContent)
 LeftPanel.Size = UDim2.new(0, leftWidth, 1, 0)
 LeftPanel.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
@@ -541,13 +542,27 @@ RightPanel.BackgroundTransparency = 1
 local frames = {}
 local tabs = {"Auto Farm", "Farm", "Killer", "Stats", "Auto Gym", "Auto Crystal", "Glitchable Rebirth", "Calculator"}
 
+-- For mobile: horizontal scrolling sidebar
+if isMobile then
+    SidebarScroll.CanvasSize = UDim2.new(0, #tabs * 70, 0, 0)
+    SidebarScroll.AutomaticCanvasSize = Enum.AutomaticSize.None
+    sideLayout.FillDirection = Enum.FillDirection.Horizontal
+    sideLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+    sideLayout.Padding = UDim.new(0, 4)
+end
+
 for i, tName in ipairs(tabs) do
     local btn = Instance.new("TextButton", SidebarScroll)
-    btn.Size = UDim2.new(1, -4, 0, 30)
+    if isMobile then
+        btn.Size = UDim2.new(0, 65, 1, -8)
+        btn.TextSize = 9
+    else
+        btn.Size = UDim2.new(1, -4, 0, 30)
+        btn.TextSize = 10
+    end
     btn.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
     btn.Text = tName
     btn.TextColor3 = Color3.new(1, 1, 1)
-    btn.TextSize = isMobile and 9 or 10
     
     local f = Instance.new("ScrollingFrame", RightPanel)
     f.Size = UDim2.new(1, 0, 1, 0)
@@ -1632,7 +1647,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
 end))
 
 -- ================================
--- DEDICATED AUTO GLITCH LOOP (ALWAYS task.wait() – NO DELAY)
+-- DEDICATED AUTO GLITCH LOOP (UPDATED - KEEPS ROCK ON HAND)
 -- ================================
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
@@ -1661,25 +1676,54 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             if punchTool then punchTool:Activate() end
 
         elseif states.selectedMethod == "NonTeleport" then 
-            local handPrefix = toggleHand and "Left" or "Right"
-            local targetHand = char:FindFirstChild(handPrefix .. "Hand") or char:FindFirstChild(handPrefix .. " Arm")
-            toggleHand = not toggleHand
-            if targetHand then 
-                if not rockCache[actualRockPart] then 
-                    rockCache[actualRockPart] = {Size = actualRockPart.Size, CanCollide = actualRockPart.CanCollide, CFrame = actualRockPart.CFrame} 
-                end
-                local mySize = player:FindFirstChild("customSize") and player.customSize.Value or tonumber(Config.SizeValue) or 1
-                local newSize = (mySize >= 2) and 2 or 1
-                actualRockPart.Size = Vector3.new(newSize, newSize, newSize)
-                actualRockPart.CanCollide = false
-                actualRockPart.CFrame = targetHand.CFrame
+            -- CRITICAL FIX: Constantly maintain rock on hand every frame
+            -- Alternate hands for better consistency
+            local currentHand = toggleHand and "Left" or "Right"
+            local targetHand = char:FindFirstChild(currentHand .. "Hand") or char:FindFirstChild(currentHand .. " Arm")
+            
+            -- Toggle hand every ~10 frames (slow down to prevent desync)
+            if math.random(1, 10) == 1 then
+                toggleHand = not toggleHand
             end
+            
+            if targetHand then 
+                -- Store rock properties only once
+                if not rockCache[actualRockPart] then 
+                    rockCache[actualRockPart] = {
+                        Size = actualRockPart.Size, 
+                        CanCollide = actualRockPart.CanCollide, 
+                        CFrame = actualRockPart.CFrame,
+                        Anchored = actualRockPart.Anchored
+                    } 
+                end
+                
+                -- Force rock properties
+                actualRockPart.CanCollide = false
+                actualRockPart.Anchored = false
+                
+                -- Adjust size based on player size
+                local mySize = player:FindFirstChild("customSize") and player.customSize.Value or tonumber(Config.SizeValue) or 1
+                local newSize = math.min(2, math.max(0.5, mySize / 2))
+                actualRockPart.Size = Vector3.new(newSize, newSize, newSize)
+                
+                -- CRITICAL: Constantly update rock position to hand
+                actualRockPart.CFrame = targetHand.CFrame * CFrame.new(0, -0.5, -1.5)
+                
+                -- Disable velocity to prevent snapping
+                actualRockPart.AssemblyLinearVelocity = Vector3.zero
+                actualRockPart.AssemblyAngularVelocity = Vector3.zero
+            end
+            
+            -- Fire punches rapidly
             pcall(function()
                 local args1 = { [1] = "punch", [2] = "leftHand" }
                 player.muscleEvent:FireServer(unpack(args1))
                 local args2 = { [1] = "punch", [2] = "rightHand" }
                 player.muscleEvent:FireServer(unpack(args2))
             end)
+            
+            -- Small delay to prevent server overload (keeps rock stable)
+            task.wait(0.05)
         end
 
         if not states.autoGlitchTrain then 
