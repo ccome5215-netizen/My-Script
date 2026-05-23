@@ -254,7 +254,10 @@ local function handleGlitchCleanup(method, callback)
             task.wait(1)
             for rock, data in pairs(rockCache) do
                 if rock and rock.Parent then
-                    rock.Size = data.Size; rock.CanCollide = data.CanCollide; rock.CFrame = data.CFrame
+                    rock.Size = data.Size
+                    rock.CanCollide = data.CanCollide
+                    rock.CFrame = data.CFrame
+                    rock.Anchored = data.Anchored
                 end
             end
             table.clear(rockCache)
@@ -291,12 +294,12 @@ local function getStrength()
     return player.leaderstats and player.leaderstats:FindFirstChild("Strength") and player.leaderstats.Strength.Value or 0
 end
 
--- Find interactSeat by gym name within machinesFolder (radius 30)
+-- Find ALL interactSeat by name and return the closest one
 local function findInteractSeatByName(gymName, nearPos)
     local folder = workspace:FindFirstChild("machinesFolder")
     if not folder then return nil end
     local bestSeat = nil
-    local bestDist = 30
+    local bestDist = 50
     for _, machine in ipairs(folder:GetChildren()) do
         if machine.Name == gymName then
             local seat = machine:FindFirstChild("interactSeat")
@@ -335,7 +338,7 @@ local function stopAutoGym()
     states.autoGym = false
 end
 
--- Start auto gym (updated with name‑based interactSeat)
+-- Start auto gym (UPDATED: teleport first, then find seat, fire remote)
 local function startAutoGym()
     stopAutoGym()
     if not states.selectedMap or not states.selectedGym then return end
@@ -379,12 +382,15 @@ local function startAutoGym()
                 continue
             end
 
-            -- Teleport
+            -- STEP 1: Teleport to gym position first
             root.CFrame = CFrame.new(gym.pos)
             root.AssemblyLinearVelocity = Vector3.zero
+            task.wait(0.1)
 
-            -- Find machine by gym name
+            -- STEP 2: Find InteractSeat by name (scan nearby)
             local seat = findInteractSeatByName(states.selectedGym, gym.pos)
+            
+            -- STEP 3: Fire remote with full seat path or simulate E key
             if seat then
                 fireMachineInteract(seat)
             else
@@ -393,7 +399,7 @@ local function startAutoGym()
 
             -- Wait until sitting
             local sitWait = 0
-            while states.autoGym and states.selectedGym == gym and sitWait < 5 do
+            while states.autoGym and states.selectedGym == gym and sitWait < 8 do
                 if chr:FindFirstChild("Seat") or (hum and hum.Sit) then break end
                 task.wait(0.2)
                 sitWait = sitWait + 0.2
@@ -767,7 +773,7 @@ end)
 local timerLabel = Instance.new("TextLabel", f1)
 timerLabel.Size = UDim2.new(1, -10, 0, 20); timerLabel.BackgroundTransparency = 1; timerLabel.TextColor3 = Color3.fromRGB(200, 200, 200); timerLabel.Text = "Glitch Timer: 00:00:00:00"
 
--- Ping & FPS Label
+-- Ping & FPS Label (FIXED)
 local pingFpsLabel = Instance.new("TextLabel", f1)
 pingFpsLabel.Size = UDim2.new(1, -10, 0, 25)
 pingFpsLabel.BackgroundTransparency = 1
@@ -777,23 +783,20 @@ pingFpsLabel.TextSize = 12
 pingFpsLabel.Text = "Ping: -- ms | FPS: --"
 
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
-    local lastTime = os.clock()
+    local lastTime = tick()
     local frameCount = 0
-    while task.wait(1) do
-        -- Ping
-        local ping = Stats:FindFirstChild("Network") and Stats.Network:FindFirstChild("ServerStatsItem") and Stats.Network.ServerStatsItem:FindFirstChild("Data Ping")
-        local pingValue = ping and ping:GetValueString() or "??"
-        
-        -- FPS
+    while task.wait() do
         frameCount = frameCount + 1
-        local currentTime = os.clock()
+        local currentTime = tick()
         if currentTime - lastTime >= 1 then
             local fps = frameCount
             frameCount = 0
             lastTime = currentTime
+            -- Ping
+            local ping = Stats:FindFirstChild("Network") and Stats.Network:FindFirstChild("ServerStatsItem") and Stats.Network.ServerStatsItem:FindFirstChild("Data Ping")
+            local pingValue = ping and ping:GetValueString() or "??"
             pingFpsLabel.Text = string.format("Ping: %s ms | FPS: %d", pingValue, fps)
         end
-        
         -- Glitch timer
         local total = states.glitchAccumulated
         if states.autoGlitch then total = total + (os.time() - states.glitchStartTime) end
@@ -822,7 +825,11 @@ end)
 local toolOptions = {"Weight", "Pushups", "Situps", "Handstands"}
 local toolDD = createDropdown(f1, "Tool Dropdown", toolOptions, false, function(v) states.selectedTool = v end)
 
-createToggle(f1, "Auto Equip Tool", function(v) if v and (not states.selectedTool or states.selectedTool == "NO TOOL FOUND") then return false end; states.autoEquip = v end)
+createToggle(f1, "Auto Equip Tool", function(v) 
+    if v and (not states.selectedTool or states.selectedTool == "NO TOOL FOUND") then return false end
+    states.autoEquip = v 
+    return v
+end)
 
 local rebBox = Instance.new("TextBox", f1)
 rebBox.Size = UDim2.new(1, -10, 0, 30); rebBox.Text = Config.RebirthTarget; rebBox.PlaceholderText = "Rebirth Target"; rebBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); rebBox.TextColor3 = Color3.new(1, 1, 1)
@@ -1603,43 +1610,54 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Auto Equip Tool (waits for backpack and character without breaking loop)
+-- Auto Equip Tool (UPDATED: Always working)
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
-        local bp = player:FindFirstChild("Backpack")
-        local char = player.Character
-        if not bp or not char or not char:FindFirstChild("HumanoidRootPart") or not char:FindFirstChild("Humanoid") or char.Humanoid.Health <= 0 then 
-            continue 
+        
+        if not states.autoEquip then
+            task.wait()
+            continue
         end
         
-        local hum = char.Humanoid
+        local bp = player:FindFirstChild("Backpack")
+        local char = player.Character
+        if not bp or not char then 
+            task.wait(0.2)
+            continue
+        end
+        
+        local hum = char:FindFirstChild("Humanoid")
+        if not hum or hum.Health <= 0 then
+            task.wait(0.2)
+            continue
+        end
+        
         local targetTool = nil
         if states.selectedTool and states.selectedTool ~= "NO TOOL FOUND" then
             targetTool = bp:FindFirstChild(states.selectedTool) or char:FindFirstChild(states.selectedTool)
         end
         
-        if states.autoEquip then
-            if targetTool then
-                if targetTool.Parent ~= char then 
-                    pcall(function() if hum then hum:EquipTool(targetTool) else targetTool.Parent = char end end)
-                end
-            else
-                local weightTool = bp:FindFirstChild("Weight") or char:FindFirstChild("Weight")
-                if weightTool and weightTool.Parent ~= char then
-                    pcall(function() if hum then hum:EquipTool(weightTool) else weightTool.Parent = char end end)
-                end
-            end
-            
-            if not states.autoGlitchTrain then
-                local currentDesired = (targetTool and targetTool.Name) or "Weight"
-                for _, t in ipairs(char:GetChildren()) do
-                    if t:IsA("Tool") and t.Name ~= currentDesired and t.Name ~= "Punch" then
-                        pcall(function() t.Parent = bp end)
-                    end
-                end
+        -- Always try to equip Weight if no tool selected or Weight is the selected tool
+        if not targetTool then
+            targetTool = bp:FindFirstChild("Weight") or char:FindFirstChild("Weight")
+        end
+        
+        if targetTool and targetTool.Parent ~= char then
+            pcall(function()
+                hum:EquipTool(targetTool)
+            end)
+        end
+        
+        -- Remove other tools from character (keep only Punch and equipped tool)
+        local keepToolName = targetTool and targetTool.Name or "Weight"
+        for _, t in ipairs(char:GetChildren()) do
+            if t:IsA("Tool") and t.Name ~= keepToolName and t.Name ~= "Punch" then
+                pcall(function() t.Parent = bp end)
             end
         end
+        
+        task.wait()
     end
 end))
 
@@ -1703,7 +1721,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             if punchTool then punchTool:Activate() end
 
         elseif states.selectedMethod == "NonTeleport" then 
-            -- Rapidly alternate left/right hand every frame (no delay)
+            -- Rapidly alternate left/right hand every frame
             local currentHand = toggleHand and "Left" or "Right"
             local targetHand = char:FindFirstChild(currentHand .. "Hand") or char:FindFirstChild(currentHand .. " Arm")
             
@@ -1738,7 +1756,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                 actualRockPart.AssemblyAngularVelocity = Vector3.zero
             end
             
-            -- Fire punches rapidly using remote events (no Punch tool activation)
+            -- Fire punches rapidly using remote events
             pcall(function()
                 local args1 = { [1] = "punch", [2] = "leftHand" }
                 player.muscleEvent:FireServer(unpack(args1))
@@ -1746,7 +1764,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                 player.muscleEvent:FireServer(unpack(args2))
             end)
             
-            -- Small delay to prevent server overload (keeps rock stable)
+            -- Small delay to prevent server overload
             task.wait(0.05)
         end
 
@@ -1774,12 +1792,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         local root, hum = char:FindFirstChild("HumanoidRootPart"), char:FindFirstChild("Humanoid")
         if not root or not hum or hum.Health <= 0 then continue end
 
-        -- Ensure Punch tool is equipped
-        local punchTool = getPunch()
-        if punchTool and punchTool.Parent ~= char then
-            pcall(function() punchTool.Parent = char end)
-        end
-
         local anyKillActive = states.killActive or states.killEveryone or states.autoGoodKarma or states.autoEvilKarma
         if anyKillActive then
             local myRightHand = char:FindFirstChild("RightHand") or char:FindFirstChild("Right Arm")
@@ -1804,7 +1816,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                                 end)
                             end
                             
-                            -- Fire right hand remote (same as auto glitch) instead of activating Punch tool
+                            -- Fire right hand remote
                             pcall(function()
                                 player.muscleEvent:FireServer("punch", "rightHand")
                             end)
