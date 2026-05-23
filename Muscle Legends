@@ -67,7 +67,10 @@ local states = {
     currentPetLabel = nil, currentPetTable = nil, currentAuraLabel = nil, currentAuraTable = nil,
     lessLag = false,
     selectedMap = nil, selectedGym = nil, autoGym = false, autoGymThread = nil,
-    selectedCrystal = nil, selectedCrystalData = nil
+    selectedPetCrystal = nil, selectedPetCrystalData = nil,
+    selectedAuraCrystal = nil, selectedAuraCrystalData = nil,
+    autoPetBuy = false, autoPetBuyThread = nil,
+    autoAuraBuy = false, autoAuraBuyThread = nil
 }
 
 local rockCache = {}
@@ -78,7 +81,6 @@ local lastStatValues = {}
 local statGains = {}
 local statGainTimes = {}
 
--- Extended rock data with glitch values
 local rockData = {
     ["Tiny Rock"]        = {req = 0,       name = "Tiny Rock",           idx = 1, glitchValue = 0.025},
     ["Punching Rock"]    = {req = 10,      name = "Punching Rock",       idx = 1, glitchValue = 0.05},
@@ -92,7 +94,7 @@ local rockData = {
     ["Jungle Rock"]      = {req = 10000000,name = "Ancient Jungle Rock", idx = 1, glitchValue = 16.25}
 }
 
--- Gym data
+-- Gym data (unchanged)
 local gymData = {
     ["Tiny Island"] = {
         ["Bench Press"] = {pos = Vector3.new(67.105286, 6.714245, 1984.269043), cost = 10},
@@ -288,6 +290,41 @@ local function getStrength()
     return player.leaderstats and player.leaderstats:FindFirstChild("Strength") and player.leaderstats.Strength.Value or 0
 end
 
+-- Find interactSeat by gym name within machinesFolder (radius 30)
+local function findInteractSeatByName(gymName, nearPos)
+    local folder = workspace:FindFirstChild("machinesFolder")
+    if not folder then return nil end
+    local bestSeat = nil
+    local bestDist = 30
+    for _, machine in ipairs(folder:GetChildren()) do
+        if machine.Name == gymName then
+            local seat = machine:FindFirstChild("interactSeat")
+            if seat then
+                local machinePos = machine:FindFirstChild("PrimaryPart") or machine:FindFirstChildWhichIsA("BasePart")
+                if machinePos then
+                    local dist = (machinePos.Position - nearPos).Magnitude
+                    if dist < bestDist then
+                        bestDist = dist
+                        bestSeat = seat
+                    end
+                end
+            end
+        end
+    end
+    return bestSeat
+end
+
+-- Fire machine interact remote
+local function fireMachineInteract(seat)
+    pcall(function()
+        local args = {
+            [1] = "useMachine",
+            [2] = seat,
+        }
+        ReplicatedStorage.rEvents.machineInteractRemote:InvokeServer(unpack(args))
+    end)
+end
+
 -- Stop auto gym
 local function stopAutoGym()
     if states.autoGymThread then
@@ -297,7 +334,7 @@ local function stopAutoGym()
     states.autoGym = false
 end
 
--- Start auto gym
+-- Start auto gym (updated with name‑based interactSeat)
 local function startAutoGym()
     stopAutoGym()
     if not states.selectedMap or not states.selectedGym then return end
@@ -336,16 +373,22 @@ local function startAutoGym()
                 continue
             end
             
-            -- Ignore/Do nothing if character is already sitting
             if hum.Sit then
                 task.wait(0.5)
                 continue
             end
 
-            -- Teleport to gym
+            -- Teleport
             root.CFrame = CFrame.new(gym.pos)
             root.AssemblyLinearVelocity = Vector3.zero
-            fireEKey()
+
+            -- Find machine by gym name
+            local seat = findInteractSeatByName(states.selectedGym, gym.pos)
+            if seat then
+                fireMachineInteract(seat)
+            else
+                fireEKey()
+            end
 
             -- Wait until sitting
             local sitWait = 0
@@ -370,8 +413,56 @@ local function toggleAutoGym()
     end
 end
 
+-- Crystal buy helpers
+local function fireBuyCrystal(data)
+    if not data then return end
+    pcall(function()
+        ReplicatedStorage.cPetShopRemote:InvokeServer(data.folderChild)
+    end)
+end
+
+local function stopAutoPetBuy()
+    if states.autoPetBuyThread then
+        pcall(task.cancel, states.autoPetBuyThread)
+        states.autoPetBuyThread = nil
+    end
+    states.autoPetBuy = false
+end
+
+local function startAutoPetBuy()
+    if not states.selectedPetCrystalData then return end
+    stopAutoPetBuy()
+    states.autoPetBuy = true
+    states.autoPetBuyThread = task.spawn(function()
+        while states.autoPetBuy do
+            fireBuyCrystal(states.selectedPetCrystalData)
+            task.wait(0.8)
+        end
+    end)
+end
+
+local function stopAutoAuraBuy()
+    if states.autoAuraBuyThread then
+        pcall(task.cancel, states.autoAuraBuyThread)
+        states.autoAuraBuyThread = nil
+    end
+    states.autoAuraBuy = false
+end
+
+local function startAutoAuraBuy()
+    if not states.selectedAuraCrystalData then return end
+    stopAutoAuraBuy()
+    states.autoAuraBuy = true
+    states.autoAuraBuyThread = task.spawn(function()
+        while states.autoAuraBuy do
+            fireBuyCrystal(states.selectedAuraCrystalData)
+            task.wait(0.8)
+        end
+    end)
+end
+
 ----------------------------------------------------------------
--- UI FRAMEWORK (scrolling tab bar)
+-- UI FRAMEWORK (vertical sidebar layout)
 ----------------------------------------------------------------
 local ScreenGui = Instance.new("ScreenGui", player.PlayerGui)
 ScreenGui.Name = "ML_Expert_v5"
@@ -398,7 +489,7 @@ TitleText.TextColor3 = Color3.new(1, 1, 1)
 TitleText.TextXAlignment = Enum.TextXAlignment.Left
 
 if UserInputService.TouchEnabled then
-    MainFrame.Size = UDim2.fromOffset(300, 320)
+    MainFrame.Size = UDim2.fromOffset(350, 400)
     MainFrame.Visible = false
     local MobileToggle = Instance.new("TextButton", ScreenGui)
     MobileToggle.Size = UDim2.fromOffset(45, 45)
@@ -409,43 +500,57 @@ if UserInputService.TouchEnabled then
     makeDraggable(MobileToggle)
     MobileToggle.MouseButton1Click:Connect(function() MainFrame.Visible = not MainFrame.Visible end)
 else
-    MainFrame.Size = UDim2.fromOffset(550, 500)
+    MainFrame.Size = UDim2.fromOffset(650, 500)
     UserInputService.InputBegan:Connect(function(input, gpe)
         if not gpe and input.KeyCode == Enum.KeyCode.Z then MainFrame.Visible = not MainFrame.Visible end
     end)
 end
 
--- Scrollable horizontal tab container
-local TabContainer = Instance.new("ScrollingFrame", MainFrame)
-TabContainer.Size = UDim2.new(1, 0, 0, 30)
-TabContainer.Position = UDim2.fromOffset(0, 30)
-TabContainer.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-TabContainer.ScrollingEnabled = true
-TabContainer.ClipsDescendants = true
-TabContainer.CanvasSize = UDim2.new(0, 0, 0, 30)
-TabContainer.AutomaticCanvasSize = Enum.AutomaticSize.X
-TabContainer.ScrollBarThickness = isMobile and 2 or 0
-TabContainer.ScrollingDirection = Enum.ScrollingDirection.X
+-- Main container below title
+local MainContent = Instance.new("Frame", MainFrame)
+MainContent.Size = UDim2.new(1, 0, 1, -30)
+MainContent.Position = UDim2.fromOffset(0, 30)
+MainContent.BackgroundTransparency = 1
 
-local tabLayout = Instance.new("UIListLayout", TabContainer)
-tabLayout.FillDirection = Enum.FillDirection.Horizontal
-tabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-tabLayout.Padding = UDim.new(0, 2)
+-- Left sidebar panel
+local leftWidth = isMobile and 80 or 120
+local LeftPanel = Instance.new("Frame", MainContent)
+LeftPanel.Size = UDim2.new(0, leftWidth, 1, 0)
+LeftPanel.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+
+local SidebarScroll = Instance.new("ScrollingFrame", LeftPanel)
+SidebarScroll.Size = UDim2.new(1, 0, 1, 0)
+SidebarScroll.BackgroundTransparency = 1
+SidebarScroll.ScrollBarThickness = isMobile and 2 or 0
+SidebarScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+SidebarScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+SidebarScroll.ScrollingEnabled = true
+SidebarScroll.ClipsDescendants = true
+
+local sideLayout = Instance.new("UIListLayout", SidebarScroll)
+sideLayout.FillDirection = Enum.FillDirection.Vertical
+sideLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+sideLayout.Padding = UDim.new(0, 2)
+
+-- Right content panel
+local RightPanel = Instance.new("Frame", MainContent)
+RightPanel.Size = UDim2.new(1, -leftWidth, 1, 0)
+RightPanel.Position = UDim2.new(0, leftWidth, 0, 0)
+RightPanel.BackgroundTransparency = 1
 
 local frames = {}
-local tabs = {"Auto Farm", "Farm", "Killer", "Stats", "Auto Gym", "Auto Crystal", "Glitchable Rebirth"}
+local tabs = {"Auto Farm", "Farm", "Killer", "Stats", "Auto Gym", "Auto Crystal", "Glitchable Rebirth", "Calculator"}
 
 for i, tName in ipairs(tabs) do
-    local btn = Instance.new("TextButton", TabContainer)
-    btn.Size = UDim2.fromOffset(80, 30)   -- fixed width for scrolling
+    local btn = Instance.new("TextButton", SidebarScroll)
+    btn.Size = UDim2.new(1, -4, 0, 30)
     btn.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
     btn.Text = tName
     btn.TextColor3 = Color3.new(1, 1, 1)
-    btn.TextSize = 10
+    btn.TextSize = isMobile and 9 or 10
     
-    local f = Instance.new("ScrollingFrame", MainFrame)
-    f.Size = UDim2.new(1, -10, 1, -70)
-    f.Position = UDim2.fromOffset(5, 65)
+    local f = Instance.new("ScrollingFrame", RightPanel)
+    f.Size = UDim2.new(1, 0, 1, 0)
     f.BackgroundTransparency = 1
     f.Visible = (i == 1)
     f.CanvasSize = UDim2.new(0, 0, 0, 0)
@@ -467,6 +572,15 @@ for i, tName in ipairs(tabs) do
         for _, other in pairs(frames) do other.Visible = false end
         f.Visible = true
     end)
+end
+
+-- Mobile farm tab scroll fix
+if isMobile then
+    local farmFrame = frames["Farm"]
+    if farmFrame then
+        local pad = Instance.new("UIPadding", farmFrame)
+        pad.PaddingBottom = UDim.new(0, 8)
+    end
 end
 
 ----------------------------------------------------------------
@@ -701,7 +815,7 @@ createToggle(f2, "Less Lag", function(val) states.lessLag = val end)
 
 local sizeBox = Instance.new("TextBox", f2)
 sizeBox.Size = UDim2.new(1, -10, 0, 30); sizeBox.Text = Config.SizeValue; sizeBox.PlaceholderText = "Size Value"; sizeBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); sizeBox.TextColor3 = Color3.new(1, 1, 1)
-sizeBox:GetPropertyChangedSignal("Text"):Connect(function() sizeBox.Text = sizeBox.Text:gsub("%D", "") end)
+-- Removed alphabet filter; allows any text including "nan"
 sizeBox.FocusLost:Connect(function() local num = tonumber(sizeBox.Text); if not num or num < 1 then sizeBox.Text = "1" elseif num > 100 then sizeBox.Text = "100" else sizeBox.Text = tostring(math.floor(num)) end; Config.SizeValue = sizeBox.Text; SaveConfig() end)
 
 createToggle(f2, "Auto Size Toggle", function(v) states.autoSize = v end)
@@ -939,18 +1053,16 @@ local gpHeader = Instance.new("TextLabel", f4); gpHeader.Size = UDim2.new(1, -10
 local gpList = Instance.new("TextLabel", f4); gpList.Size = UDim2.new(1, -10, 0, 200); gpList.BackgroundTransparency = 1; gpList.TextColor3 = Color3.new(1, 1, 1); gpList.TextXAlignment = Enum.TextXAlignment.Left; gpList.TextYAlignment = Enum.TextYAlignment.Top; gpList.Text = "None"; gpList.TextWrapped = true; gpList.AutomaticSize = Enum.AutomaticSize.Y
 
 ----------------------------------------------------------------
--- TAB 5: AUTO GYM
+-- TAB 5: AUTO GYM (UPDATED)
 ----------------------------------------------------------------
 local f5 = frames["Auto Gym"]
 
--- Ordering the dropdowns Map first, then Gym
 local mapDD
 local gymDD
 
 mapDD = createDropdown(f5, "Select Map", {"Tiny Island", "Beach", "Legend Beach", "Frozen Island", "Mystic Island", "Inferno Island", "Legend Island", "Muscle King Island", "Jungle Island"}, false, function(map)
     states.selectedMap = map
     states.selectedGym = nil
-    -- Build gym list with cost strings
     local gymOptions = {}
     local data = gymData[map]
     if data then
@@ -970,12 +1082,11 @@ end)
 
 gymDD = createDropdown(f5, "Select Gym", {"Select map first"}, false, function(gymName)
     if not states.selectedMap or gymName == "Select map first" or gymName == "No gyms available" then return end
-    -- Extract real gym name (strip cost)
     local realName = gymName:gsub(" %(.*%)", "")
     states.selectedGym = realName
 end)
 
--- Gym button (one-time)
+-- Gym button (one-time, uses interactSeat by name)
 local gymBtn = Instance.new("TextButton", f5)
 gymBtn.Size = UDim2.new(1, -10, 0, 35)
 gymBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
@@ -991,14 +1102,18 @@ gymBtn.MouseButton1Click:Connect(function()
     local chr = player.Character
     if not chr or not chr:FindFirstChild("HumanoidRootPart") then return end
     local hum = chr:FindFirstChild("Humanoid")
-    if hum and hum.Sit then return end -- IGNORE TELEPORT IF SITTING
-    
+    if hum and hum.Sit then return end
     chr.HumanoidRootPart.CFrame = CFrame.new(gym.pos)
     chr.HumanoidRootPart.AssemblyLinearVelocity = Vector3.zero
-    fireEKey()
+    local seat = findInteractSeatByName(states.selectedGym, gym.pos)
+    if seat then
+        fireMachineInteract(seat)
+    else
+        fireEKey()
+    end
 end)
 
--- Auto Gym toggle (now includes continuous repeat)
+-- Auto Gym toggle
 local autoGymBtn = createToggle(f5, "Auto Gym", function(val)
     if val then
         if not states.selectedMap or not states.selectedGym then return false end
@@ -1010,143 +1125,171 @@ local autoGymBtn = createToggle(f5, "Auto Gym", function(val)
 end)
 
 ----------------------------------------------------------------
--- TAB 6: AUTO CRYSTAL (ENHANCED)
+-- TAB 6: AUTO CRYSTAL (SPLIT PETS & AURAS)
 ----------------------------------------------------------------
 local f6 = frames["Auto Crystal"]
 
--- Crystal data cache
-local crystalDataList = {}  -- { {name, imageId, rarity, cost, costType, folderChild} }
+local petList = {}
+local auraList = {}
 
-local function scanCrystalFolder()
+local function scanCrystalShop()
     local folder = ReplicatedStorage:FindFirstChild("cPetShopFolder")
-    if not folder then return {} end
-    local list = {}
+    if not folder then return end
+    local pets = {}
+    local auras = {}
     for _, child in ipairs(folder:GetChildren()) do
-        -- Check priceValue → PriceType StringValue
         local priceFolder = child:FindFirstChild("priceValue")
-        if priceFolder then
-            local priceType = priceFolder:FindFirstChild("PriceType")
-            if priceType and priceType:IsA("StringValue") and priceType.Value == "Tokens" then
-                -- Skip token-priced items
-                continue
-            end
-        end
+        if not priceFolder then continue end
+        -- Check priceType (skip Tokens)
+        local priceType = priceFolder:FindFirstChild("PriceType")
+        if priceType and priceType:IsA("StringValue") and priceType.Value == "Tokens" then continue end
         
-        -- Extract data
         local imageId = ""
         local imageObj = child:FindFirstChild("imageValue")
-        if imageObj and imageObj:IsA("StringValue") then
-            imageId = imageObj.Value
-        end
+        if imageObj and imageObj:IsA("StringValue") then imageId = imageObj.Value end
         
         local rarity = ""
         local rarityObj = child:FindFirstChild("rarityValue")
-        if rarityObj and rarityObj:IsA("StringValue") then
-            rarity = rarityObj.Value
-        end
+        if rarityObj and rarityObj:IsA("StringValue") then rarity = rarityObj.Value end
         
         local cost = 0
         local costType = ""
-        if priceFolder then
-            local costObj = priceFolder:FindFirstChild("Value") or priceFolder:FindFirstChildWhichIsA("NumberValue") or priceFolder:FindFirstChildWhichIsA("IntValue")
-            if costObj then
-                cost = costObj.Value
-            end
-            local typeObj = priceFolder:FindFirstChild("PriceType")
-            if typeObj and typeObj:IsA("StringValue") then
-                costType = typeObj.Value
-            end
+        if priceFolder:IsA("NumberValue") or priceFolder:IsA("IntValue") then
+            cost = priceFolder.Value
+        end
+        if priceType and priceType:IsA("StringValue") then
+            costType = priceType.Value
         end
         
-        table.insert(list, {
+        local data = {
             name = child.Name,
             imageId = imageId,
             rarity = rarity,
             cost = cost,
             costType = costType,
-            folderChild = child
-        })
-    end
-    return list
-end
-
-crystalDataList = scanCrystalFolder()
-
--- Build dropdown options with display info
-local crystalOptions = {}
-for _, data in ipairs(crystalDataList) do
-    table.insert(crystalOptions, data.name)
-end
-if #crystalOptions == 0 then
-    table.insert(crystalOptions, "Nothing available")
-end
-
--- Info display label
-local crystalInfoLabel = Instance.new("TextLabel", f6)
-crystalInfoLabel.Size = UDim2.new(1, -10, 0, 80)
-crystalInfoLabel.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-crystalInfoLabel.Text = "Select a pet/aura to view details\nCost: N/A"
-crystalInfoLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-crystalInfoLabel.Font = Enum.Font.Gotham
-crystalInfoLabel.TextSize = 11
-crystalInfoLabel.TextWrapped = true
-crystalInfoLabel.TextXAlignment = Enum.TextXAlignment.Left
-crystalInfoLabel.TextYAlignment = Enum.TextYAlignment.Top
-Instance.new("UICorner", crystalInfoLabel).CornerRadius = UDim.new(0, 8)
-
--- Image display
-local crystalImage = Instance.new("ImageLabel", f6)
-crystalImage.Size = UDim2.new(1, -10, 0, 80)
-crystalImage.BackgroundTransparency = 1
-crystalImage.Image = ""
-crystalImage.ScaleType = Enum.ScaleType.Fit
-
-local crystalDD = createDropdown(f6, "Pet/Aura Dropdown", crystalOptions, false, function(v)
-    if v == "Nothing available" then
-        states.selectedCrystal = nil
-        states.selectedCrystalData = nil
-        crystalInfoLabel.Text = "Select a pet/aura to view details\nCost: N/A"
-        crystalImage.Image = ""
-    else
-        states.selectedCrystal = v
-        -- Find matching data
-        for _, data in ipairs(crystalDataList) do
-            if data.name == v then
-                states.selectedCrystalData = data
-                -- Update info label
-                local costStr = formatNum(data.cost)
-                crystalInfoLabel.Text = data.name .. "\nRarity: " .. data.rarity .. "\nCost: " .. costStr .. " " .. data.costType
-                -- Update image
-                if data.imageId ~= "" then
-                    crystalImage.Image = data.imageId  -- already contains "rbxassetid://..."
-                else
-                    crystalImage.Image = ""
-                end
-                break
-            end
+            folderChild = child,
+        }
+        
+        if child:FindFirstChild("isPowerUp") then
+            table.insert(auras, data)
+        else
+            table.insert(pets, data)
         end
     end
-end)
+    petList = pets
+    auraList = auras
+end
+scanCrystalShop()
 
--- Buy button
-local buyCrystalBtn = Instance.new("TextButton", f6)
-buyCrystalBtn.Size = UDim2.new(1, -10, 0, 35)
-buyCrystalBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
-buyCrystalBtn.Text = "Buy Crystal"
-buyCrystalBtn.TextColor3 = Color3.new(1, 1, 1)
-buyCrystalBtn.MouseButton1Click:Connect(function()
-    if not states.selectedCrystalData then return end
-    pcall(function()
-        ReplicatedStorage.cPetShopRemote:InvokeServer(states.selectedCrystalData.folderChild)
+-- Helper to create a crystal section (dropdown + image + info + buttons)
+local function createCrystalSection(parent, title, list, stateKeyData, stateKeyName, autoState, startAutoFunc, stopAutoFunc)
+    local titleLabel = Instance.new("TextLabel", parent)
+    titleLabel.Size = UDim2.new(1, -10, 0, 25)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Text = title
+    titleLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextSize = 14
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    
+    local options = {}
+    for _, data in ipairs(list) do
+        table.insert(options, data.name)
+    end
+    if #options == 0 then table.insert(options, "Nothing available") end
+    
+    local imageLabel = Instance.new("ImageLabel", parent)
+    imageLabel.Size = UDim2.new(1, -10, 0, 80)
+    imageLabel.BackgroundTransparency = 1
+    imageLabel.Image = ""
+    imageLabel.ScaleType = Enum.ScaleType.Fit
+    
+    local infoLabel = Instance.new("TextLabel", parent)
+    infoLabel.Size = UDim2.new(1, -10, 0, 70)
+    infoLabel.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    infoLabel.Text = "Select an item to view details\nCost: N/A"
+    infoLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    infoLabel.Font = Enum.Font.Gotham
+    infoLabel.TextSize = 11
+    infoLabel.TextWrapped = true
+    infoLabel.TextXAlignment = Enum.TextXAlignment.Left
+    infoLabel.TextYAlignment = Enum.TextYAlignment.Top
+    Instance.new("UICorner", infoLabel).CornerRadius = UDim.new(0, 8)
+    
+    local dropdown = createDropdown(parent, title .. " Dropdown", options, false, function(v)
+        if v == "Nothing available" then
+            states[stateKeyData] = nil
+            states[stateKeyName] = nil
+            infoLabel.Text = "Select an item to view details\nCost: N/A"
+            imageLabel.Image = ""
+        else
+            states[stateKeyName] = v
+            for _, data in ipairs(list) do
+                if data.name == v then
+                    states[stateKeyData] = data
+                    local costStr = formatNum(data.cost)
+                    infoLabel.Text = "Name: " .. data.name .. "\nCost: " .. costStr .. " " .. data.costType .. "\nRarity: " .. data.rarity
+                    if data.imageId ~= "" then
+                        imageLabel.Image = data.imageId
+                    else
+                        imageLabel.Image = ""
+                    end
+                    break
+                end
+            end
+        end
     end)
-end)
+    
+    local buyBtn = Instance.new("TextButton", parent)
+    buyBtn.Size = UDim2.new(1, -10, 0, 35)
+    buyBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
+    buyBtn.Text = "Buy"
+    buyBtn.TextColor3 = Color3.new(1, 1, 1)
+    buyBtn.MouseButton1Click:Connect(function()
+        local data = states[stateKeyData]
+        if not data then return end
+        fireBuyCrystal(data)
+    end)
+    
+    local buy5Btn = Instance.new("TextButton", parent)
+    buy5Btn.Size = UDim2.new(1, -10, 0, 35)
+    buy5Btn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
+    buy5Btn.Text = "Buy 5"
+    buy5Btn.TextColor3 = Color3.new(1, 1, 1)
+    buy5Btn.MouseButton1Click:Connect(function()
+        local data = states[stateKeyData]
+        if not data then return end
+        for _ = 1, 5 do
+            fireBuyCrystal(data)
+            task.wait(0.05)
+        end
+    end)
+    
+    local autoBuyToggle = createToggle(parent, "Auto Buy", function(on)
+        if on then
+            local data = states[stateKeyData]
+            if not data then return false end
+            startAutoFunc()
+        else
+            stopAutoFunc()
+        end
+        return on
+    end)
+    
+    return dropdown
+end
+
+-- Pet section
+createCrystalSection(f6, "--- PETS ---", petList, "selectedPetCrystalData", "selectedPetCrystal", states.autoPetBuy, startAutoPetBuy, stopAutoPetBuy)
+
+-- Aura section
+createCrystalSection(f6, "--- AURAS ---", auraList, "selectedAuraCrystalData", "selectedAuraCrystal", states.autoAuraBuy, startAutoAuraBuy, stopAutoAuraBuy)
 
 ----------------------------------------------------------------
--- TAB 7: GLITCHABLE REBIRTH (NEW)
+-- TAB 7: GLITCHABLE REBIRTH
 ----------------------------------------------------------------
 local f7 = frames["Glitchable Rebirth"]
 
--- Rock dropdown for glitch calculation
 local glitchRockOptions = {}
 for name, data in pairs(rockData) do
     table.insert(glitchRockOptions, name .. " (" .. data.glitchValue .. ")")
@@ -1154,24 +1297,19 @@ end
 
 local selectedGlitchRock = nil
 local expGivesResult = nil
-local rebirthRequiredResult = nil
 
 local glitchRockDD = createDropdown(f7, "Rock Dropdown", glitchRockOptions, false, function(v)
-    -- Extract rock name from string like "Tiny Rock (0.025)"
     local rockName = v:match("^(.-) %(")
     if rockName and rockData[rockName] then
         selectedGlitchRock = rockName
     end
     expGivesResult = nil
-    rebirthRequiredResult = nil
-    -- Update labels
     _G.GlitchExpGivesLabel.Text = "EXP GIVES: N/A"
     _G.GlitchGlitchableLabel.Text = "GLITCHABLE?: N/A"
     _G.GlitchRebirthRequiredLabel.Text = "Rebirth Required: N/A"
     _G.GlitchPetExpCalcLabel.Text = "Result: N/A"
 end)
 
--- Labels to display results
 local expGivesLabel = Instance.new("TextLabel", f7)
 expGivesLabel.Size = UDim2.new(1, -10, 0, 25)
 expGivesLabel.BackgroundTransparency = 1
@@ -1190,7 +1328,6 @@ glitchableLabel.Font = Enum.Font.Gotham
 glitchableLabel.TextSize = 12
 _G.GlitchGlitchableLabel = glitchableLabel
 
--- Button to calculate exp gives
 local calcExpGivesBtn = Instance.new("TextButton", f7)
 calcExpGivesBtn.Size = UDim2.new(1, -10, 0, 35)
 calcExpGivesBtn.BackgroundColor3 = Color3.fromRGB(40, 80, 140)
@@ -1201,16 +1338,12 @@ calcExpGivesBtn.MouseButton1Click:Connect(function()
     local rock = rockData[selectedGlitchRock]
     if not rock then return end
     local rebirths = player.leaderstats and player.leaderstats:FindFirstChild("Rebirths") and player.leaderstats.Rebirths.Value or 0
-    local value = rock.glitchValue
-    local result = (rebirths + 20) * value
+    local result = (rebirths + 20) * rock.glitchValue
     expGivesResult = result
     expGivesLabel.Text = "EXP GIVES: " .. result
-    -- Check if result has decimal
-    local isInteger = (result % 1 == 0)
-    glitchableLabel.Text = "GLITCHABLE?: " .. (isInteger and "YES" or "NO")
+    glitchableLabel.Text = "GLITCHABLE?: " .. (result % 1 == 0 and "YES" or "NO")
 end)
 
--- EXP textbox (whole numbers only)
 local expTextBox = Instance.new("TextBox", f7)
 expTextBox.Size = UDim2.new(1, -10, 0, 30)
 expTextBox.PlaceholderText = "EXP (whole numbers only)"
@@ -1219,12 +1352,9 @@ expTextBox.TextColor3 = Color3.new(1, 1, 1)
 expTextBox.Text = ""
 expTextBox:GetPropertyChangedSignal("Text"):Connect(function()
     local filtered = expTextBox.Text:gsub("[^%d]", "")
-    if filtered ~= expTextBox.Text then
-        expTextBox.Text = filtered
-    end
+    if filtered ~= expTextBox.Text then expTextBox.Text = filtered end
 end)
 
--- Check Rebirth Required button
 local calcRebirthRequiredBtn = Instance.new("TextButton", f7)
 calcRebirthRequiredBtn.Size = UDim2.new(1, -10, 0, 35)
 calcRebirthRequiredBtn.BackgroundColor3 = Color3.fromRGB(40, 80, 140)
@@ -1238,15 +1368,12 @@ calcRebirthRequiredBtn.MouseButton1Click:Connect(function()
     if not expValue then return end
     local result = (expValue / rock.glitchValue) - 20
     if result % 1 ~= 0 then
-        rebirthRequiredResult = nil
         _G.GlitchRebirthRequiredLabel.Text = "Rebirth Required: DECIMAL NUMBER DETECTED NO RESULT OUT"
     else
-        rebirthRequiredResult = math.floor(result)
-        _G.GlitchRebirthRequiredLabel.Text = "Rebirth Required: " .. rebirthRequiredResult
+        _G.GlitchRebirthRequiredLabel.Text = "Rebirth Required: " .. math.floor(result)
     end
 end)
 
--- Rebirth Required label
 local rebirthRequiredLabel = Instance.new("TextLabel", f7)
 rebirthRequiredLabel.Size = UDim2.new(1, -10, 0, 25)
 rebirthRequiredLabel.BackgroundTransparency = 1
@@ -1256,7 +1383,6 @@ rebirthRequiredLabel.Font = Enum.Font.Gotham
 rebirthRequiredLabel.TextSize = 12
 _G.GlitchRebirthRequiredLabel = rebirthRequiredLabel
 
--- PET EXP textbox
 local petExpTextBox = Instance.new("TextBox", f7)
 petExpTextBox.Size = UDim2.new(1, -10, 0, 30)
 petExpTextBox.PlaceholderText = "PET EXP (whole numbers only)"
@@ -1265,12 +1391,9 @@ petExpTextBox.TextColor3 = Color3.new(1, 1, 1)
 petExpTextBox.Text = ""
 petExpTextBox:GetPropertyChangedSignal("Text"):Connect(function()
     local filtered = petExpTextBox.Text:gsub("[^%d]", "")
-    if filtered ~= petExpTextBox.Text then
-        petExpTextBox.Text = filtered
-    end
+    if filtered ~= petExpTextBox.Text then petExpTextBox.Text = filtered end
 end)
 
--- Calculate PET EXP – EXP GIVES button
 local calcPetExpBtn = Instance.new("TextButton", f7)
 calcPetExpBtn.Size = UDim2.new(1, -10, 0, 35)
 calcPetExpBtn.BackgroundColor3 = Color3.fromRGB(40, 80, 140)
@@ -1285,7 +1408,6 @@ calcPetExpBtn.MouseButton1Click:Connect(function()
     _G.GlitchPetExpCalcLabel.Text = "Result: " .. result
 end)
 
--- Result label for PET EXP calculation
 local petExpCalcLabel = Instance.new("TextLabel", f7)
 petExpCalcLabel.Size = UDim2.new(1, -10, 0, 25)
 petExpCalcLabel.BackgroundTransparency = 1
@@ -1294,6 +1416,51 @@ petExpCalcLabel.TextColor3 = Color3.new(1, 1, 1)
 petExpCalcLabel.Font = Enum.Font.Gotham
 petExpCalcLabel.TextSize = 12
 _G.GlitchPetExpCalcLabel = petExpCalcLabel
+
+----------------------------------------------------------------
+-- TAB 8: CALCULATOR (UPDATED – ALLOWS 'x' FOR MULTIPLICATION)
+----------------------------------------------------------------
+local f8 = frames["Calculator"]
+
+local calcInput = Instance.new("TextBox", f8)
+calcInput.Size = UDim2.new(1, -10, 0, 35)
+calcInput.PlaceholderText = "Expression (e.g. 2x2 or (20+20)*12.5)"
+calcInput.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+calcInput.TextColor3 = Color3.new(1, 1, 1)
+calcInput.Font = Enum.Font.Gotham
+calcInput.TextSize = 14
+-- No filter; allows any text, including letters
+
+local calcResultLabel = Instance.new("TextLabel", f8)
+calcResultLabel.Size = UDim2.new(1, -10, 0, 30)
+calcResultLabel.BackgroundTransparency = 1
+calcResultLabel.Text = "Result: "
+calcResultLabel.TextColor3 = Color3.new(1, 1, 1)
+calcResultLabel.Font = Enum.Font.GothamBold
+calcResultLabel.TextSize = 16
+
+local calcBtn = Instance.new("TextButton", f8)
+calcBtn.Size = UDim2.new(1, -10, 0, 40)
+calcBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
+calcBtn.Text = "Calculate"
+calcBtn.TextColor3 = Color3.new(1, 1, 1)
+calcBtn.MouseButton1Click:Connect(function()
+    local expr = calcInput.Text:gsub("%s", "")       -- remove spaces
+    expr = expr:gsub("=", "")                        -- remove any equal signs
+    expr = expr:gsub("[xX]", "*")                    -- replace 'x' with '*'
+    if expr == "" then
+        calcResultLabel.Text = "Result: (empty)"
+        return
+    end
+    local success, result = pcall(function()
+        return loadstring("return " .. expr)()
+    end)
+    if success then
+        calcResultLabel.Text = "Result: " .. tostring(result)
+    else
+        calcResultLabel.Text = "Result: Invalid expression"
+    end
+end)
 
 ----------------------------------------------------------------
 -- MAIN LOOPS
@@ -1356,7 +1523,7 @@ end))
 -- Weight Glue Logic (Background Loop - Always active when holding Weight)
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
-        task.wait() -- No delay
+        task.wait()
         local char = player.Character
         if not char then continue end
         local tool = char:FindFirstChild("Weight")
@@ -1378,7 +1545,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                 end
             end
         else
-            -- If not holding weight or not finding it in char, clean up glue if it somehow got stuck on a handle in backpack
             local bp = player:FindFirstChild("Backpack")
             if bp then
                 for _, t in ipairs(bp:GetChildren()) do
@@ -1396,7 +1562,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
 end))
 
 -- Auto Equip Tool (waits for backpack and character without breaking loop)
--- FIXED: No longer unequips tools when Auto Equip is OFF
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
@@ -1412,21 +1577,18 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             targetTool = bp:FindFirstChild(states.selectedTool) or char:FindFirstChild(states.selectedTool)
         end
         
-        -- Logic: If Auto Equip is ON
         if states.autoEquip then
             if targetTool then
                 if targetTool.Parent ~= char then 
                     pcall(function() if hum then hum:EquipTool(targetTool) else targetTool.Parent = char end end)
                 end
             else
-                -- If the target tool we want isn't found, default to Weight if we have it
                 local weightTool = bp:FindFirstChild("Weight") or char:FindFirstChild("Weight")
                 if weightTool and weightTool.Parent ~= char then
                     pcall(function() if hum then hum:EquipTool(weightTool) else weightTool.Parent = char end end)
                 end
             end
             
-            -- If Auto Equip is ON, unequip everything else except what we want to hold AND Punch
             if not states.autoGlitchTrain then
                 local currentDesired = (targetTool and targetTool.Name) or "Weight"
                 for _, t in ipairs(char:GetChildren()) do
@@ -1436,7 +1598,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                 end
             end
         end
-        -- Auto Equip OFF → do nothing; tools are managed by the dedicated glitch loop only when Auto Glitch is ON
     end
 end))
 
@@ -1512,7 +1673,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                 actualRockPart.Size = Vector3.new(newSize, newSize, newSize)
                 actualRockPart.CanCollide = false
                 actualRockPart.CFrame = targetHand.CFrame
-                -- NonTeleport no longer edits the originalPosition value
             end
             pcall(function()
                 local args1 = { [1] = "punch", [2] = "leftHand" }
@@ -1522,7 +1682,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             end)
         end
 
-        -- If Auto Glitch Train is OFF, stop and unequip other tools (keep Punch)
         if not states.autoGlitchTrain then 
             for _, tool in ipairs(char:GetChildren()) do 
                 if tool:IsA("Tool") and tool.Name ~= "Punch" then 
@@ -1561,7 +1720,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                         
                         if shouldKill and not states.whitelist[p.Name] then 
                             for _, part in ipairs(p.Character:GetDescendants()) do
-                                -- Teleport all BaseParts except Hands/Arms
                                 if part:IsA("BasePart") and not string.match(part.Name:lower(), "hand") and not string.match(part.Name:lower(), "arm") then
                                     pcall(function()
                                         part.CFrame = myHand.CFrame * CFrame.new(0, 0, -3)
@@ -1723,7 +1881,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- 10-MINUTE ANTI-AFK (RIGHT CLICK) - RESTORED
+-- 10-MINUTE ANTI-AFK (RIGHT CLICK)
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while task.wait(600) do
         pcall(function()
