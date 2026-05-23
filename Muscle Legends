@@ -15,6 +15,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
+local Stats = game:GetService("Stats")
 local player = Players.LocalPlayer
 
 local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
@@ -766,8 +767,34 @@ end)
 local timerLabel = Instance.new("TextLabel", f1)
 timerLabel.Size = UDim2.new(1, -10, 0, 20); timerLabel.BackgroundTransparency = 1; timerLabel.TextColor3 = Color3.fromRGB(200, 200, 200); timerLabel.Text = "Glitch Timer: 00:00:00:00"
 
+-- Ping & FPS Label
+local pingFpsLabel = Instance.new("TextLabel", f1)
+pingFpsLabel.Size = UDim2.new(1, -10, 0, 25)
+pingFpsLabel.BackgroundTransparency = 1
+pingFpsLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+pingFpsLabel.Font = Enum.Font.GothamBold
+pingFpsLabel.TextSize = 12
+pingFpsLabel.Text = "Ping: -- ms | FPS: --"
+
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
+    local lastTime = os.clock()
+    local frameCount = 0
     while task.wait(1) do
+        -- Ping
+        local ping = Stats:FindFirstChild("Network") and Stats.Network:FindFirstChild("ServerStatsItem") and Stats.Network.ServerStatsItem:FindFirstChild("Data Ping")
+        local pingValue = ping and ping:GetValueString() or "??"
+        
+        -- FPS
+        frameCount = frameCount + 1
+        local currentTime = os.clock()
+        if currentTime - lastTime >= 1 then
+            local fps = frameCount
+            frameCount = 0
+            lastTime = currentTime
+            pingFpsLabel.Text = string.format("Ping: %s ms | FPS: %d", pingValue, fps)
+        end
+        
+        -- Glitch timer
         local total = states.glitchAccumulated
         if states.autoGlitch then total = total + (os.time() - states.glitchStartTime) end
         local d, h, m, s = math.floor(total / 86400), math.floor((total % 86400) / 3600), math.floor((total % 3600) / 60), total % 60
@@ -1647,7 +1674,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
 end))
 
 -- ================================
--- DEDICATED AUTO GLITCH LOOP (UPDATED - KEEPS ROCK ON HAND)
+-- DEDICATED AUTO GLITCH LOOP (UPDATED - NO OFFSET, RAPID HAND SWITCH)
 -- ================================
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
@@ -1676,15 +1703,12 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             if punchTool then punchTool:Activate() end
 
         elseif states.selectedMethod == "NonTeleport" then 
-            -- CRITICAL FIX: Constantly maintain rock on hand every frame
-            -- Alternate hands for better consistency
+            -- Rapidly alternate left/right hand every frame (no delay)
             local currentHand = toggleHand and "Left" or "Right"
             local targetHand = char:FindFirstChild(currentHand .. "Hand") or char:FindFirstChild(currentHand .. " Arm")
             
-            -- Toggle hand every ~10 frames (slow down to prevent desync)
-            if math.random(1, 10) == 1 then
-                toggleHand = not toggleHand
-            end
+            -- Toggle every frame for maximum speed
+            toggleHand = not toggleHand
             
             if targetHand then 
                 -- Store rock properties only once
@@ -1706,15 +1730,15 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                 local newSize = math.min(2, math.max(0.5, mySize / 2))
                 actualRockPart.Size = Vector3.new(newSize, newSize, newSize)
                 
-                -- CRITICAL: Constantly update rock position to hand
-                actualRockPart.CFrame = targetHand.CFrame * CFrame.new(0, -0.5, -1.5)
+                -- NO OFFSET: rock goes exactly to hand position
+                actualRockPart.CFrame = targetHand.CFrame
                 
                 -- Disable velocity to prevent snapping
                 actualRockPart.AssemblyLinearVelocity = Vector3.zero
                 actualRockPart.AssemblyAngularVelocity = Vector3.zero
             end
             
-            -- Fire punches rapidly
+            -- Fire punches rapidly using remote events (no Punch tool activation)
             pcall(function()
                 local args1 = { [1] = "punch", [2] = "leftHand" }
                 player.muscleEvent:FireServer(unpack(args1))
@@ -1740,19 +1764,26 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
 end))
 
 -- ================================
--- KILL LOGIC (respects Less Lag) – ALL EXCEPT HANDS
+-- KILL LOGIC (UPDATED: TELEPORT HEAD TO RIGHT HAND + REMOTE PUNCH)
 -- ================================
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
-        local char = player.Character; if not char then continue end
+        local char = player.Character
+        if not char then continue end
         local root, hum = char:FindFirstChild("HumanoidRootPart"), char:FindFirstChild("Humanoid")
         if not root or not hum or hum.Health <= 0 then continue end
 
+        -- Ensure Punch tool is equipped
+        local punchTool = getPunch()
+        if punchTool and punchTool.Parent ~= char then
+            pcall(function() punchTool.Parent = char end)
+        end
+
         local anyKillActive = states.killActive or states.killEveryone or states.autoGoodKarma or states.autoEvilKarma
         if anyKillActive then
-            local myHand = char:FindFirstChild("RightHand") or char:FindFirstChild("Right Arm")
-            if myHand then 
+            local myRightHand = char:FindFirstChild("RightHand") or char:FindFirstChild("Right Arm")
+            if myRightHand then 
                 for _, p in ipairs(Players:GetPlayers()) do 
                     if p ~= player and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
                         local shouldKill = false
@@ -1763,17 +1794,20 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                         end
                         
                         if shouldKill and not states.whitelist[p.Name] then 
-                            for _, part in ipairs(p.Character:GetDescendants()) do
-                                if part:IsA("BasePart") and not string.match(part.Name:lower(), "hand") and not string.match(part.Name:lower(), "arm") then
-                                    pcall(function()
-                                        part.CFrame = myHand.CFrame * CFrame.new(0, 0, -3)
-                                        part.AssemblyLinearVelocity = Vector3.zero
-                                        part.AssemblyAngularVelocity = Vector3.zero
-                                    end)
-                                end
+                            -- Teleport victim's Head to my right hand
+                            local victimHead = p.Character:FindFirstChild("Head")
+                            if victimHead then
+                                pcall(function()
+                                    victimHead.CFrame = myRightHand.CFrame
+                                    victimHead.AssemblyLinearVelocity = Vector3.zero
+                                    victimHead.AssemblyAngularVelocity = Vector3.zero
+                                end)
                             end
-                            local punchTool = getPunch()
-                            if punchTool then pcall(function() punchTool:Activate() end) end
+                            
+                            -- Fire right hand remote (same as auto glitch) instead of activating Punch tool
+                            pcall(function()
+                                player.muscleEvent:FireServer("punch", "rightHand")
+                            end)
                         end
                     end
                 end
