@@ -71,7 +71,8 @@ local states = {
     selectedPetCrystal = nil, selectedPetCrystalData = nil,
     selectedAuraCrystal = nil, selectedAuraCrystalData = nil,
     autoPetBuy = false, autoPetBuyThread = nil,
-    autoAuraBuy = false, autoAuraBuyThread = nil
+    autoAuraBuy = false, autoAuraBuyThread = nil,
+    autoUnequipBoosts = false
 }
 
 local rockCache = {}
@@ -294,28 +295,43 @@ local function getStrength()
     return player.leaderstats and player.leaderstats:FindFirstChild("Strength") and player.leaderstats.Strength.Value or 0
 end
 
--- Find ALL interactSeat by name and return the closest one
-local function findInteractSeatByName(gymName, nearPos)
+-- Improved interact seat finder (searches all machines, finds any interactSeat inside)
+local function findAnyInteractSeat(nearPos)
     local folder = workspace:FindFirstChild("machinesFolder")
     if not folder then return nil end
     local bestSeat = nil
     local bestDist = 50
     for _, machine in ipairs(folder:GetChildren()) do
-        if machine.Name == gymName then
-            local seat = machine:FindFirstChild("interactSeat")
-            if seat then
-                local machinePos = machine:FindFirstChild("PrimaryPart") or machine:FindFirstChildWhichIsA("BasePart")
-                if machinePos then
-                    local dist = (machinePos.Position - nearPos).Magnitude
-                    if dist < bestDist then
-                        bestDist = dist
-                        bestSeat = seat
-                    end
+        local seat = machine:FindFirstChild("interactSeat")
+        if seat then
+            local machinePos = machine:FindFirstChild("PrimaryPart") or machine:FindFirstChildWhichIsA("BasePart")
+            if machinePos then
+                local dist = (machinePos.Position - nearPos).Magnitude
+                if dist < bestDist then
+                    bestDist = dist
+                    bestSeat = seat
                 end
             end
         end
     end
     return bestSeat
+end
+
+-- Find seat by name, fallback to any seat if not found
+local function findInteractSeatByName(gymName, nearPos)
+    local folder = workspace:FindFirstChild("machinesFolder")
+    if not folder then return findAnyInteractSeat(nearPos) end
+    -- First try exact name match
+    for _, machine in ipairs(folder:GetChildren()) do
+        if machine.Name == gymName then
+            local seat = machine:FindFirstChild("interactSeat")
+            if seat then
+                return seat
+            end
+        end
+    end
+    -- Fallback: search all machines for any seat
+    return findAnyInteractSeat(nearPos)
 end
 
 -- Fire machine interact remote
@@ -325,7 +341,7 @@ local function fireMachineInteract(seat)
             [1] = "useMachine",
             [2] = seat,
         }
-        game:GetService("ReplicatedStorage").rEvents.machineInteractRemote:InvokeServer(unpack(args))
+        ReplicatedStorage.rEvents.machineInteractRemote:InvokeServer(unpack(args))
     end)
 end
 
@@ -338,7 +354,7 @@ local function stopAutoGym()
     states.autoGym = false
 end
 
--- Start auto gym (UPDATED: teleport first, then find seat, fire remote)
+-- Start auto gym (repeatedly teleports and attempts to sit until seated)
 local function startAutoGym()
     stopAutoGym()
     if not states.selectedMap or not states.selectedGym then return end
@@ -352,11 +368,9 @@ local function startAutoGym()
 
             -- Strength check
             local cost = gym.cost
-            if cost then
-                if getStrength() < cost then
-                    if states.lessLag then task.wait(0.5) else task.wait(0.1) end
-                    continue
-                end
+            if cost and getStrength() < cost then
+                if states.lessLag then task.wait(0.5) else task.wait(0.1) end
+                continue
             end
 
             -- Muscle King check
@@ -377,32 +391,41 @@ local function startAutoGym()
                 continue
             end
             
+            -- If already sitting, we are done for this cycle
             if hum.Sit then
                 task.wait(0.5)
                 continue
             end
 
-            -- STEP 1: Teleport to gym position first
+            -- Teleport to gym position
             root.CFrame = CFrame.new(gym.pos)
             root.AssemblyLinearVelocity = Vector3.zero
             task.wait(0.1)
 
-            -- STEP 2: Find InteractSeat by name (scan nearby)
+            -- Find seat
             local seat = findInteractSeatByName(states.selectedGym, gym.pos)
-            
-            -- STEP 3: Fire remote with full seat path or simulate E key
             if seat then
                 fireMachineInteract(seat)
             else
                 fireEKey()
             end
 
-            -- Wait until sitting
-            local sitWait = 0
-            while states.autoGym and states.selectedGym == gym and sitWait < 8 do
-                if chr:FindFirstChild("Seat") or (hum and hum.Sit) then break end
+            -- Wait to sit, but keep trying if not sitting within 1 second
+            local startWait = tick()
+            while states.autoGym and states.selectedGym == gym and tick() - startWait < 5 do
+                if hum.Sit then break end
                 task.wait(0.2)
-                sitWait = sitWait + 0.2
+                -- If still not sitting, re-teleport and try again
+                if not hum.Sit and tick() - startWait > 1 then
+                    root.CFrame = CFrame.new(gym.pos)
+                    root.AssemblyLinearVelocity = Vector3.zero
+                    if seat then
+                        fireMachineInteract(seat)
+                    else
+                        fireEKey()
+                    end
+                    startWait = tick()
+                end
             end
 
             task.wait(0.5)
@@ -411,7 +434,7 @@ local function startAutoGym()
     end)
 end
 
--- Toggle auto gym (from button)
+-- Toggle auto gym
 local function toggleAutoGym()
     if states.autoGym then
         stopAutoGym()
@@ -496,7 +519,6 @@ TitleText.TextColor3 = Color3.new(1, 1, 1)
 TitleText.TextXAlignment = Enum.TextXAlignment.Left
 
 if UserInputService.TouchEnabled then
-    -- MOBILE: Smaller GUI and horizontal scrolling tabs at top
     MainFrame.Size = UDim2.fromOffset(320, 380)
     MainFrame.Visible = false
     local MobileToggle = Instance.new("TextButton", ScreenGui)
@@ -520,12 +542,11 @@ MainContent.Size = UDim2.new(1, 0, 1, -30)
 MainContent.Position = UDim2.fromOffset(0, 30)
 MainContent.BackgroundTransparency = 1
 
--- Left sidebar / Top mobile panel container configuration
+-- Left sidebar / Top mobile panel
 local LeftPanel = Instance.new("Frame", MainContent)
 local RightPanel = Instance.new("Frame", MainContent)
 
 if isMobile then
-    -- MOBILE DESIGN: Tab selection goes on top horizontally
     LeftPanel.Size = UDim2.new(1, 0, 0, 35)
     LeftPanel.Position = UDim2.fromOffset(0, 0)
     LeftPanel.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
@@ -534,7 +555,6 @@ if isMobile then
     RightPanel.Position = UDim2.fromOffset(0, 35)
     RightPanel.BackgroundTransparency = 1
 else
-    -- DESKTOP DESIGN: Vertical Layout
     local leftWidth = 120
     LeftPanel.Size = UDim2.new(0, leftWidth, 1, 0)
     LeftPanel.Position = UDim2.fromOffset(0, 0)
@@ -789,7 +809,7 @@ end)
 local timerLabel = Instance.new("TextLabel", f1)
 timerLabel.Size = UDim2.new(1, -10, 0, 20); timerLabel.BackgroundTransparency = 1; timerLabel.TextColor3 = Color3.fromRGB(200, 200, 200); timerLabel.Text = "Glitch Timer: 00:00:00:00"
 
--- Ping & FPS Label (FIXED)
+-- Ping & FPS Label
 local pingFpsLabel = Instance.new("TextLabel", f1)
 pingFpsLabel.Size = UDim2.new(1, -10, 0, 25)
 pingFpsLabel.BackgroundTransparency = 1
@@ -808,12 +828,10 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             local fps = frameCount
             frameCount = 0
             lastTime = currentTime
-            -- Ping
             local ping = Stats:FindFirstChild("Network") and Stats.Network:FindFirstChild("ServerStatsItem") and Stats.Network.ServerStatsItem:FindFirstChild("Data Ping")
             local pingValue = ping and ping:GetValueString() or "??"
             pingFpsLabel.Text = string.format("Ping: %s ms | FPS: %d", pingValue, fps)
         end
-        -- Glitch timer
         local total = states.glitchAccumulated
         if states.autoGlitch then total = total + (os.time() - states.glitchStartTime) end
         local d, h, m, s = math.floor(total / 86400), math.floor((total % 86400) / 3600), math.floor((total % 3600) / 60), total % 60
@@ -918,7 +936,23 @@ snackBtn.MouseButton1Click:Connect(function()
     local skip = {Weight=1, Punch=1, ["Ground Slam"]=1, Stomp=1, Handstands=1, Situps=1, Pushups=1}; local char = player.Character; if not char then return end; local snacksToEat = {}; for _, t in ipairs(player.Backpack:GetChildren()) do if t:IsA("Tool") and not skip[t.Name] then table.insert(snacksToEat, t) end end; for _, t in ipairs(snacksToEat) do t.Parent = char; t:Activate() end; task.wait(); for _, t in ipairs(snacksToEat) do t.Parent = player.Backpack end
 end)
 
-lockPosBtn = createToggle(f2, "Lock Position", function(val) if states.autoMuscleKing and val then return false end; if val and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then states.lockedPos = player.Character.HumanoidRootPart.CFrame else states.lockedPos = nil end; return val end)
+lockPosBtn = createToggle(f2, "Lock Position", function(val) if states.autoMuscleKing and val then return false end; if val then states.lockedPos = player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player.Character.HumanoidRootPart.CFrame; end; return val end)
+
+-- UnEquip Boosts & Drinks toggle
+local unequipBoostsBtn = createToggle(f2, "UnEquip Boosts & Drinks", function(val)
+    states.autoUnequipBoosts = val
+    return val
+end)
+
+-- Freeze Pet placeholder
+local freezePetLabel = Instance.new("TextLabel", f2)
+freezePetLabel.Size = UDim2.new(1, -10, 0, 30)
+freezePetLabel.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+freezePetLabel.Text = "Freeze Pet [Coming Soon]"
+freezePetLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+freezePetLabel.Font = Enum.Font.Gotham
+freezePetLabel.TextSize = 12
+
 local smallHopBtn = Instance.new("TextButton", f2); smallHopBtn.Size = UDim2.new(1, -10, 0, 35); smallHopBtn.Text = "Small Server Hop"; smallHopBtn.BackgroundColor3 = Color3.fromRGB(40, 60, 60); smallHopBtn.TextColor3 = Color3.new(1, 1, 1); smallHopBtn.MouseButton1Click:Connect(function() ServerHop("Small") end)
 local largeHopBtn = Instance.new("TextButton", f2); largeHopBtn.Size = UDim2.new(1, -10, 0, 35); largeHopBtn.Text = "Large Server Hop"; largeHopBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40); largeHopBtn.TextColor3 = Color3.new(1, 1, 1); largeHopBtn.MouseButton1Click:Connect(function() ServerHop("Large") end)
 
@@ -938,6 +972,7 @@ createToggle(f3, "Auto Evil Karma", function(v) states.autoEvilKarma = v; if v t
 ----------------------------------------------------------------
 -- TAB 4: REWORKED STATS & INVENTORY
 ----------------------------------------------------------------
+-- (unchanged, same as original)
 local f4 = frames["Stats"]
 local statsPlayerDD
 local basicDD, advDD, rareDD, epicDD, uniqueDD
@@ -1150,7 +1185,7 @@ gymDD = createDropdown(f5, "Select Gym", {"Select map first"}, false, function(g
     states.selectedGym = realName
 end)
 
--- Gym button (one-time execution targeting accurate interactSeat inside child loop)
+-- Gym button (improved: teleport then repeatedly attempt to sit)
 local gymBtn = Instance.new("TextButton", f5)
 gymBtn.Size = UDim2.new(1, -10, 0, 35)
 gymBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
@@ -1168,26 +1203,29 @@ gymBtn.MouseButton1Click:Connect(function()
     local hum = chr:FindFirstChild("Humanoid")
     if hum and hum.Sit then return end
     
+    -- Teleport to gym position
     chr.HumanoidRootPart.CFrame = CFrame.new(gym.pos)
     chr.HumanoidRootPart.AssemblyLinearVelocity = Vector3.zero
     
-    -- Exact dynamic workspace checking matching implementation rules
-    local machineFolder = workspace:FindFirstChild("machinesFolder")
-    if machineFolder then
-        for _, child in ipairs(machineFolder:GetChildren()) do
-            if child.Name == states.selectedGym then
-                local interactSeat = child:FindFirstChild("interactSeat")
-                if interactSeat then
-                    local args = {
-                        [1] = "useMachine",
-                        [2] = interactSeat
-                    }
-                    game:GetService("ReplicatedStorage").rEvents.machineInteractRemote:InvokeServer(unpack(args))
-                    break
-                end
+    -- Try to find seat and interact, repeating until sitting or timeout
+    task.spawn(function()
+        local startTime = tick()
+        while tick() - startTime < 10 do
+            if hum and hum.Sit then break end
+            local seat = findInteractSeatByName(states.selectedGym, gym.pos)
+            if seat then
+                fireMachineInteract(seat)
+            else
+                fireEKey()
+            end
+            task.wait(0.5)
+            -- Re-teleport occasionally to ensure proximity
+            if tick() - startTime > 1 and (not hum or not hum.Sit) then
+                chr.HumanoidRootPart.CFrame = CFrame.new(gym.pos)
+                chr.HumanoidRootPart.AssemblyLinearVelocity = Vector3.zero
             end
         end
-    end
+    end)
 end)
 
 -- Auto Gym toggle
@@ -1202,7 +1240,7 @@ local autoGymBtn = createToggle(f5, "Auto Gym", function(val)
 end)
 
 ----------------------------------------------------------------
--- TAB 6: AUTO CRYSTAL (SPLIT PETS & AURAS)
+-- TAB 6: AUTO CRYSTAL (SPLIT PETS & AURAS) - FIXED TOKEN FILTER
 ----------------------------------------------------------------
 local f6 = frames["Auto Crystal"]
 
@@ -1217,8 +1255,10 @@ local function scanCrystalShop()
     for _, child in ipairs(folder:GetChildren()) do
         local priceFolder = child:FindFirstChild("priceValue")
         if not priceFolder then continue end
-        local priceType = priceFolder:FindFirstChild("PriceType")
-        if priceType and priceType:IsA("StringValue") and priceType.Value == "Tokens" then continue end
+        -- Skip Tokens
+        local priceTypeObj = priceFolder:FindFirstChild("PriceType")
+        local priceType = priceTypeObj and priceTypeObj:IsA("StringValue") and priceTypeObj.Value or ""
+        if priceType == "Tokens" then continue end
         
         local imageId = ""
         local imageObj = child:FindFirstChild("imageValue")
@@ -1233,8 +1273,8 @@ local function scanCrystalShop()
         if priceFolder:IsA("NumberValue") or priceFolder:IsA("IntValue") then
             cost = priceFolder.Value
         end
-        if priceType and priceType:IsA("StringValue") then
-            costType = priceType.Value
+        if priceTypeObj and priceTypeObj:IsA("StringValue") then
+            costType = priceTypeObj.Value
         end
         
         local data = {
@@ -1360,6 +1400,7 @@ createCrystalSection(f6, "--- AURAS ---", auraList, "selectedAuraCrystalData", "
 ----------------------------------------------------------------
 -- TAB 7: GLITCHABLE REBIRTH
 ----------------------------------------------------------------
+-- (unchanged, same as original)
 local f7 = frames["Glitchable Rebirth"]
 
 local glitchRockOptions = {}
@@ -1536,14 +1577,45 @@ end)
 ----------------------------------------------------------------
 -- MAIN LOOPS
 ----------------------------------------------------------------
+-- Auto Muscle King: constant teleport, no position check, no velocity reset
 table.insert(getgenv().ML_Expert_Loops, RunService.Heartbeat:Connect(function()
-    local char = player.Character; if char and char:FindFirstChild("HumanoidRootPart") then
-        local root = char.HumanoidRootPart
-        if states.autoMuscleKing then local mkPos = Vector3.new(-8761.708984, 494.232361, -5858.251953); if (root.Position - mkPos).Magnitude > 3 then root.CFrame = CFrame.new(mkPos); root.AssemblyLinearVelocity, root.AssemblyAngularVelocity = Vector3.zero, Vector3.zero end; states.lastSafePos = root.CFrame
-        elseif states.lockedPos then if (root.Position - states.lockedPos.Position).Magnitude > 1.5 then root.CFrame = states.lockedPos; root.AssemblyLinearVelocity, root.AssemblyAngularVelocity = Vector3.zero, Vector3.zero end; states.lastSafePos = root.CFrame end
+    if states.autoMuscleKing then
+        local char = player.Character
+        if char and char:FindFirstChild("HumanoidRootPart") then
+            local mkPos = Vector3.new(-8761.708984, 494.232361, -5858.251953)
+            char.HumanoidRootPart.CFrame = CFrame.new(mkPos)
+        end
+    elseif states.lockedPos then
+        local char = player.Character
+        if char and char:FindFirstChild("HumanoidRootPart") then
+            char.HumanoidRootPart.CFrame = states.lockedPos
+        end
     end
 end))
 
+-- UnEquip Boosts & Drinks loop (no delay)
+table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
+    local allowedWorkoutTools = {
+        ["Punch"] = true, ["Weight"] = true, ["Stomp"] = true,
+        ["Ground Slam"] = true, ["Pushups"] = true, ["Handstands"] = true, ["Situps"] = true
+    }
+    while true do
+        task.wait()
+        if not states.autoUnequipBoosts then continue end
+        local char = player.Character
+        if not char then continue end
+        for _, tool in ipairs(char:GetChildren()) do
+            if tool:IsA("Tool") and not allowedWorkoutTools[tool.Name] then
+                local bp = player:FindFirstChild("Backpack")
+                if bp then
+                    pcall(function() tool.Parent = bp end)
+                end
+            end
+        end
+    end
+end))
+
+-- God mode, size, fly, walkspeed (respects Less Lag)
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
@@ -1584,11 +1656,11 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                     end
                 end
             end
-            if not states.autoMuscleKing and not states.lockedPos then if states.godMode then if states.lastSafePos and (root.Position - states.lastSafePos.Position).Magnitude > 150 then root.CFrame = states.lastSafePos; root.AssemblyLinearVelocity, root.AssemblyAngularVelocity = Vector3.zero, Vector3.zero else states.lastSafePos = root.CFrame end else states.lastSafePos = root.CFrame end end
         end
     end
 end))
 
+-- Weight Glue Logic (unchanged)
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         task.wait()
@@ -1629,6 +1701,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
+-- Auto Equip Tool (unchanged)
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
@@ -1677,6 +1750,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
+-- Anti-drop tools (unchanged)
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     local allowedTools = {["Punch"]=true, ["Weight"]=true, ["Stomp"]=true, 
     ["Ground Slam"]=true, ["Pushups"]=true, ["Handstands"]=true, ["Situps"]=true}
@@ -1706,6 +1780,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
+-- Auto Glitch loop (unchanged)
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         task.wait()
@@ -1735,9 +1810,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         elseif states.selectedMethod == "NonTeleport" then 
             local currentHand = toggleHand and "Left" or "Right"
             local targetHand = char:FindFirstChild(currentHand .. "Hand") or char:FindFirstChild(currentHand .. " Arm")
-            
             toggleHand = not toggleHand
-            
             if targetHand then 
                 if not rockCache[actualRockPart] then 
                     rockCache[actualRockPart] = {
@@ -1747,27 +1820,21 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                         Anchored = actualRockPart.Anchored
                     } 
                 end
-                
                 actualRockPart.CanCollide = false
                 actualRockPart.Anchored = false
-                
                 local mySize = player:FindFirstChild("customSize") and player.customSize.Value or tonumber(Config.SizeValue) or 1
                 local newSize = math.min(2, math.max(0.5, mySize / 2))
                 actualRockPart.Size = Vector3.new(newSize, newSize, newSize)
-                
                 actualRockPart.CFrame = targetHand.CFrame
-                
                 actualRockPart.AssemblyLinearVelocity = Vector3.zero
                 actualRockPart.AssemblyAngularVelocity = Vector3.zero
             end
-            
             pcall(function()
                 local args1 = { [1] = "punch", [2] = "leftHand" }
                 player.muscleEvent:FireServer(unpack(args1))
                 local args2 = { [1] = "punch", [2] = "rightHand" }
                 player.muscleEvent:FireServer(unpack(args2))
             end)
-            
             task.wait(0.05)
         end
 
@@ -1784,6 +1851,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
+-- Kill logic (no attackTime modification, only Head teleport and remote)
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
@@ -1814,7 +1882,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                                     victimHead.AssemblyAngularVelocity = Vector3.zero
                                 end)
                             end
-                            
                             pcall(function()
                                 player.muscleEvent:FireServer("punch", "rightHand")
                             end)
@@ -1826,6 +1893,8 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
+-- Auto Chest, Auto Lift, Auto Claim, Auto Fortune Wheel, Rebirth/Stats, Player list, Anti-AFK, Fast Punch/Auto Punch (unchanged, but removed attackTime modification from kill)
+-- The fast punch loop still exists but kill logic no longer touches attackTime
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while task.wait(1) do
         if states.autoChest then
@@ -1872,6 +1941,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
+-- Rebirth, Stats, View Player, Pet/Aura refresh (unchanged)
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while task.wait() do
         if states.autoRebirthInf then ReplicatedStorage.rEvents.rebirthRemote:InvokeServer("rebirthRequest") end
@@ -1973,6 +2043,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
+-- Fast Punch / Auto Punch / Accel Reps (removed attackTime modification for kill)
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
@@ -1981,8 +2052,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         
         local p = getPunch()
         if p and p:FindFirstChild("attackTime") then
-            local anyKillActive = states.killActive or states.killEveryone or states.autoGoodKarma or states.autoEvilKarma
-            if states.fastPunch or anyKillActive then
+            if states.fastPunch then
                 pcall(function() p.attackTime.Value = 0 end)
             elseif not states.autoGlitch then
                 pcall(function() p.attackTime.Value = 0.35 end)
