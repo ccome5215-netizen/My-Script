@@ -325,7 +325,7 @@ local function fireMachineInteract(seat)
             [1] = "useMachine",
             [2] = seat,
         }
-        ReplicatedStorage.rEvents.machineInteractRemote:InvokeServer(unpack(args))
+        game:GetService("ReplicatedStorage").rEvents.machineInteractRemote:InvokeServer(unpack(args))
     end)
 end
 
@@ -469,7 +469,7 @@ local function startAutoAuraBuy()
 end
 
 ----------------------------------------------------------------
--- UI FRAMEWORK (vertical sidebar layout)
+-- UI FRAMEWORK
 ----------------------------------------------------------------
 local ScreenGui = Instance.new("ScreenGui", player.PlayerGui)
 ScreenGui.Name = "ML_Expert_v5"
@@ -496,7 +496,7 @@ TitleText.TextColor3 = Color3.new(1, 1, 1)
 TitleText.TextXAlignment = Enum.TextXAlignment.Left
 
 if UserInputService.TouchEnabled then
-    -- MOBILE: Smaller GUI and horizontal scrolling tabs
+    -- MOBILE: Smaller GUI and horizontal scrolling tabs at top
     MainFrame.Size = UDim2.fromOffset(320, 380)
     MainFrame.Visible = false
     local MobileToggle = Instance.new("TextButton", ScreenGui)
@@ -520,50 +520,68 @@ MainContent.Size = UDim2.new(1, 0, 1, -30)
 MainContent.Position = UDim2.fromOffset(0, 30)
 MainContent.BackgroundTransparency = 1
 
--- Left sidebar panel
-local leftWidth = isMobile and 70 or 120
+-- Left sidebar / Top mobile panel container configuration
 local LeftPanel = Instance.new("Frame", MainContent)
-LeftPanel.Size = UDim2.new(0, leftWidth, 1, 0)
-LeftPanel.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+local RightPanel = Instance.new("Frame", MainContent)
+
+if isMobile then
+    -- MOBILE DESIGN: Tab selection goes on top horizontally
+    LeftPanel.Size = UDim2.new(1, 0, 0, 35)
+    LeftPanel.Position = UDim2.fromOffset(0, 0)
+    LeftPanel.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    
+    RightPanel.Size = UDim2.new(1, 0, 1, -35)
+    RightPanel.Position = UDim2.fromOffset(0, 35)
+    RightPanel.BackgroundTransparency = 1
+else
+    -- DESKTOP DESIGN: Vertical Layout
+    local leftWidth = 120
+    LeftPanel.Size = UDim2.new(0, leftWidth, 1, 0)
+    LeftPanel.Position = UDim2.fromOffset(0, 0)
+    LeftPanel.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    
+    RightPanel.Size = UDim2.new(1, -leftWidth, 1, 0)
+    RightPanel.Position = UDim2.fromOffset(leftWidth, 0)
+    RightPanel.BackgroundTransparency = 1
+end
 
 local SidebarScroll = Instance.new("ScrollingFrame", LeftPanel)
 SidebarScroll.Size = UDim2.new(1, 0, 1, 0)
 SidebarScroll.BackgroundTransparency = 1
-SidebarScroll.ScrollBarThickness = isMobile and 2 or 0
 SidebarScroll.ScrollingEnabled = true
 SidebarScroll.ClipsDescendants = true
 
--- For mobile: horizontal scrolling sidebar
-if isMobile then
-    SidebarScroll.ScrollingDirection = Enum.ScrollingDirection.X
-    SidebarScroll.CanvasSize = UDim2.new(#tabs * 70, 0, 0, 0)
-    SidebarScroll.AutomaticCanvasSize = Enum.AutomaticSize.None
-end
-
 local sideLayout = Instance.new("UIListLayout", SidebarScroll)
+
 if isMobile then
+    SidebarScroll.ScrollBarThickness = 2
+    SidebarScroll.ScrollingDirection = Enum.ScrollingDirection.X
     sideLayout.FillDirection = Enum.FillDirection.Horizontal
     sideLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+    sideLayout.VerticalAlignment = Enum.VerticalAlignment.Center
     sideLayout.Padding = UDim.new(0, 4)
 else
+    SidebarScroll.ScrollBarThickness = 0
+    SidebarScroll.ScrollingDirection = Enum.ScrollingDirection.Y
     sideLayout.FillDirection = Enum.FillDirection.Vertical
     sideLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
     sideLayout.Padding = UDim.new(0, 2)
 end
 
--- Right content panel
-local RightPanel = Instance.new("Frame", MainContent)
-RightPanel.Size = UDim2.new(1, -leftWidth, 1, 0)
-RightPanel.Position = UDim2.new(0, leftWidth, 0, 0)
-RightPanel.BackgroundTransparency = 1
-
 local frames = {}
 local tabs = {"Auto Farm", "Farm", "Killer", "Stats", "Auto Gym", "Auto Crystal", "Glitchable Rebirth", "Calculator"}
+
+if isMobile then
+    SidebarScroll.CanvasSize = UDim2.new(0, #tabs * 75, 0, 0)
+    SidebarScroll.AutomaticCanvasSize = Enum.AutomaticSize.None
+else
+    SidebarScroll.CanvasSize = UDim2.new(0, 0, 0, #tabs * 32)
+end
 
 for i, tName in ipairs(tabs) do
     local btn = Instance.new("TextButton", SidebarScroll)
     if isMobile then
-        btn.Size = UDim2.new(0, 65, 1, -8)
+        btn.Size = UDim2.new(0, 70, 1, -4)
         btn.TextSize = 9
     else
         btn.Size = UDim2.new(1, -4, 0, 30)
@@ -583,10 +601,7 @@ for i, tName in ipairs(tabs) do
     f.ClipsDescendants = true
     f.ElasticBehavior = Enum.ElasticBehavior.WhenScrollable
     f.ScrollBarThickness = isMobile and 6 or 2
-    
-    if isMobile then
-        f.ScrollingDirection = Enum.ScrollingDirection.Y
-    end
+    f.ScrollingDirection = Enum.ScrollingDirection.Y
     
     local layout = Instance.new("UIListLayout", f)
     layout.Padding = UDim.new(0, 5)
@@ -598,7 +613,6 @@ for i, tName in ipairs(tabs) do
     end)
 end
 
--- Mobile farm tab scroll fix
 if isMobile then
     local farmFrame = frames["Farm"]
     if farmFrame then
@@ -866,7 +880,6 @@ createToggle(f2, "Less Lag", function(val) states.lessLag = val end)
 
 local sizeBox = Instance.new("TextBox", f2)
 sizeBox.Size = UDim2.new(1, -10, 0, 30); sizeBox.Text = Config.SizeValue; sizeBox.PlaceholderText = "Size Value"; sizeBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); sizeBox.TextColor3 = Color3.new(1, 1, 1)
--- Removed alphabet filter; allows any text including "nan"
 sizeBox.FocusLost:Connect(function() local num = tonumber(sizeBox.Text); if not num or num < 1 then sizeBox.Text = "1" elseif num > 100 then sizeBox.Text = "100" else sizeBox.Text = tostring(math.floor(num)) end; Config.SizeValue = sizeBox.Text; SaveConfig() end)
 
 createToggle(f2, "Auto Size Toggle", function(v) states.autoSize = v end)
@@ -1104,7 +1117,7 @@ local gpHeader = Instance.new("TextLabel", f4); gpHeader.Size = UDim2.new(1, -10
 local gpList = Instance.new("TextLabel", f4); gpList.Size = UDim2.new(1, -10, 0, 200); gpList.BackgroundTransparency = 1; gpList.TextColor3 = Color3.new(1, 1, 1); gpList.TextXAlignment = Enum.TextXAlignment.Left; gpList.TextYAlignment = Enum.TextYAlignment.Top; gpList.Text = "None"; gpList.TextWrapped = true; gpList.AutomaticSize = Enum.AutomaticSize.Y
 
 ----------------------------------------------------------------
--- TAB 5: AUTO GYM (UPDATED)
+-- TAB 5: AUTO GYM (HYPER ACCURATE SEAT DETECTION)
 ----------------------------------------------------------------
 local f5 = frames["Auto Gym"]
 
@@ -1137,7 +1150,7 @@ gymDD = createDropdown(f5, "Select Gym", {"Select map first"}, false, function(g
     states.selectedGym = realName
 end)
 
--- Gym button (one-time, uses interactSeat by name)
+-- Gym button (one-time execution targeting accurate interactSeat inside child loop)
 local gymBtn = Instance.new("TextButton", f5)
 gymBtn.Size = UDim2.new(1, -10, 0, 35)
 gymBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
@@ -1154,13 +1167,26 @@ gymBtn.MouseButton1Click:Connect(function()
     if not chr or not chr:FindFirstChild("HumanoidRootPart") then return end
     local hum = chr:FindFirstChild("Humanoid")
     if hum and hum.Sit then return end
+    
     chr.HumanoidRootPart.CFrame = CFrame.new(gym.pos)
     chr.HumanoidRootPart.AssemblyLinearVelocity = Vector3.zero
-    local seat = findInteractSeatByName(states.selectedGym, gym.pos)
-    if seat then
-        fireMachineInteract(seat)
-    else
-        fireEKey()
+    
+    -- Exact dynamic workspace checking matching implementation rules
+    local machineFolder = workspace:FindFirstChild("machinesFolder")
+    if machineFolder then
+        for _, child in ipairs(machineFolder:GetChildren()) do
+            if child.Name == states.selectedGym then
+                local interactSeat = child:FindFirstChild("interactSeat")
+                if interactSeat then
+                    local args = {
+                        [1] = "useMachine",
+                        [2] = interactSeat
+                    }
+                    game:GetService("ReplicatedStorage").rEvents.machineInteractRemote:InvokeServer(unpack(args))
+                    break
+                end
+            end
+        end
     end
 end)
 
@@ -1191,7 +1217,6 @@ local function scanCrystalShop()
     for _, child in ipairs(folder:GetChildren()) do
         local priceFolder = child:FindFirstChild("priceValue")
         if not priceFolder then continue end
-        -- Check priceType (skip Tokens)
         local priceType = priceFolder:FindFirstChild("PriceType")
         if priceType and priceType:IsA("StringValue") and priceType.Value == "Tokens" then continue end
         
@@ -1232,7 +1257,6 @@ local function scanCrystalShop()
 end
 scanCrystalShop()
 
--- Helper to create a crystal section (dropdown + image + info + buttons)
 local function createCrystalSection(parent, title, list, stateKeyData, stateKeyName, autoState, startAutoFunc, stopAutoFunc)
     local titleLabel = Instance.new("TextLabel", parent)
     titleLabel.Size = UDim2.new(1, -10, 0, 25)
@@ -1330,10 +1354,7 @@ local function createCrystalSection(parent, title, list, stateKeyData, stateKeyN
     return dropdown
 end
 
--- Pet section
 createCrystalSection(f6, "--- PETS ---", petList, "selectedPetCrystalData", "selectedPetCrystal", states.autoPetBuy, startAutoPetBuy, stopAutoPetBuy)
-
--- Aura section
 createCrystalSection(f6, "--- AURAS ---", auraList, "selectedAuraCrystalData", "selectedAuraCrystal", states.autoAuraBuy, startAutoAuraBuy, stopAutoAuraBuy)
 
 ----------------------------------------------------------------
@@ -1469,7 +1490,7 @@ petExpCalcLabel.TextSize = 12
 _G.GlitchPetExpCalcLabel = petExpCalcLabel
 
 ----------------------------------------------------------------
--- TAB 8: CALCULATOR (UPDATED – ALLOWS 'x' FOR MULTIPLICATION)
+-- TAB 8: CALCULATOR
 ----------------------------------------------------------------
 local f8 = frames["Calculator"]
 
@@ -1480,7 +1501,6 @@ calcInput.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 calcInput.TextColor3 = Color3.new(1, 1, 1)
 calcInput.Font = Enum.Font.Gotham
 calcInput.TextSize = 14
--- No filter; allows any text, including letters
 
 local calcResultLabel = Instance.new("TextLabel", f8)
 calcResultLabel.Size = UDim2.new(1, -10, 0, 30)
@@ -1496,9 +1516,9 @@ calcBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
 calcBtn.Text = "Calculate"
 calcBtn.TextColor3 = Color3.new(1, 1, 1)
 calcBtn.MouseButton1Click:Connect(function()
-    local expr = calcInput.Text:gsub("%s", "")       -- remove spaces
-    expr = expr:gsub("=", "")                        -- remove any equal signs
-    expr = expr:gsub("[xX]", "*")                    -- replace 'x' with '*'
+    local expr = calcInput.Text:gsub("%s", "")
+    expr = expr:gsub("=", "")
+    expr = expr:gsub("[xX]", "*")
     if expr == "" then
         calcResultLabel.Text = "Result: (empty)"
         return
@@ -1516,7 +1536,6 @@ end)
 ----------------------------------------------------------------
 -- MAIN LOOPS
 ----------------------------------------------------------------
--- Position lock / Auto Muscle King (Heartbeat based to prevent lag)
 table.insert(getgenv().ML_Expert_Loops, RunService.Heartbeat:Connect(function()
     local char = player.Character; if char and char:FindFirstChild("HumanoidRootPart") then
         local root = char.HumanoidRootPart
@@ -1525,7 +1544,6 @@ table.insert(getgenv().ML_Expert_Loops, RunService.Heartbeat:Connect(function()
     end
 end))
 
--- God mode, size, fly, walkspeed (respects Less Lag)
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
@@ -1571,7 +1589,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Weight Glue Logic (Background Loop - Always active when holding Weight)
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         task.wait()
@@ -1612,7 +1629,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Auto Equip Tool (UPDATED: Always working)
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
@@ -1640,7 +1656,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             targetTool = bp:FindFirstChild(states.selectedTool) or char:FindFirstChild(states.selectedTool)
         end
         
-        -- Always try to equip Weight if no tool selected or Weight is the selected tool
         if not targetTool then
             targetTool = bp:FindFirstChild("Weight") or char:FindFirstChild("Weight")
         end
@@ -1651,7 +1666,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             end)
         end
         
-        -- Remove other tools from character (keep only Punch and equipped tool)
         local keepToolName = targetTool and targetTool.Name or "Weight"
         for _, t in ipairs(char:GetChildren()) do
             if t:IsA("Tool") and t.Name ~= keepToolName and t.Name ~= "Punch" then
@@ -1663,7 +1677,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Anti-drop tools
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     local allowedTools = {["Punch"]=true, ["Weight"]=true, ["Stomp"]=true, 
     ["Ground Slam"]=true, ["Pushups"]=true, ["Handstands"]=true, ["Situps"]=true}
@@ -1693,9 +1706,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- ================================
--- DEDICATED AUTO GLITCH LOOP (UPDATED - NO OFFSET, RAPID HAND SWITCH)
--- ================================
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         task.wait()
@@ -1723,15 +1733,12 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             if punchTool then punchTool:Activate() end
 
         elseif states.selectedMethod == "NonTeleport" then 
-            -- Rapidly alternate left/right hand every frame
             local currentHand = toggleHand and "Left" or "Right"
             local targetHand = char:FindFirstChild(currentHand .. "Hand") or char:FindFirstChild(currentHand .. " Arm")
             
-            -- Toggle every frame for maximum speed
             toggleHand = not toggleHand
             
             if targetHand then 
-                -- Store rock properties only once
                 if not rockCache[actualRockPart] then 
                     rockCache[actualRockPart] = {
                         Size = actualRockPart.Size, 
@@ -1741,24 +1748,19 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                     } 
                 end
                 
-                -- Force rock properties
                 actualRockPart.CanCollide = false
                 actualRockPart.Anchored = false
                 
-                -- Adjust size based on player size
                 local mySize = player:FindFirstChild("customSize") and player.customSize.Value or tonumber(Config.SizeValue) or 1
                 local newSize = math.min(2, math.max(0.5, mySize / 2))
                 actualRockPart.Size = Vector3.new(newSize, newSize, newSize)
                 
-                -- NO OFFSET: rock goes exactly to hand position
                 actualRockPart.CFrame = targetHand.CFrame
                 
-                -- Disable velocity to prevent snapping
                 actualRockPart.AssemblyLinearVelocity = Vector3.zero
                 actualRockPart.AssemblyAngularVelocity = Vector3.zero
             end
             
-            -- Fire punches rapidly using remote events
             pcall(function()
                 local args1 = { [1] = "punch", [2] = "leftHand" }
                 player.muscleEvent:FireServer(unpack(args1))
@@ -1766,7 +1768,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                 player.muscleEvent:FireServer(unpack(args2))
             end)
             
-            -- Small delay to prevent server overload
             task.wait(0.05)
         end
 
@@ -1783,9 +1784,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- ================================
--- KILL LOGIC (UPDATED: TELEPORT HEAD TO RIGHT HAND + REMOTE PUNCH)
--- ================================
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
@@ -1808,7 +1806,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                         end
                         
                         if shouldKill and not states.whitelist[p.Name] then 
-                            -- Teleport victim's Head to my right hand
                             local victimHead = p.Character:FindFirstChild("Head")
                             if victimHead then
                                 pcall(function()
@@ -1818,7 +1815,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                                 end)
                             end
                             
-                            -- Fire right hand remote
                             pcall(function()
                                 player.muscleEvent:FireServer("punch", "rightHand")
                             end)
@@ -1830,7 +1826,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Auto Chest
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while task.wait(1) do
         if states.autoChest then
@@ -1844,7 +1839,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Auto Lift No Anim
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function() 
     while true do 
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end 
@@ -1852,7 +1846,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end 
 end))
 
--- Auto Claim Gift
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while task.wait(1) do
         if states.autoClaim then
@@ -1865,7 +1858,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Auto Fortune Wheel
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while task.wait(1) do
         if states.autoFortuneWheel then
@@ -1880,7 +1872,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Rebirth, Stats, View Player, Pet/Aura refresh
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while task.wait() do
         if states.autoRebirthInf then ReplicatedStorage.rEvents.rebirthRemote:InvokeServer("rebirthRequest") end
@@ -1954,7 +1945,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Player list refresh
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while task.wait(1) do 
         local killList, statsList, currentMap = {}, {}, {}
@@ -1973,7 +1963,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- 10-MINUTE ANTI-AFK (RIGHT CLICK)
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while task.wait(600) do
         pcall(function()
@@ -1984,7 +1973,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Fast Punch / Auto Punch / Accel Reps
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
