@@ -530,15 +530,26 @@ local SidebarScroll = Instance.new("ScrollingFrame", LeftPanel)
 SidebarScroll.Size = UDim2.new(1, 0, 1, 0)
 SidebarScroll.BackgroundTransparency = 1
 SidebarScroll.ScrollBarThickness = isMobile and 2 or 0
-SidebarScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-SidebarScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 SidebarScroll.ScrollingEnabled = true
 SidebarScroll.ClipsDescendants = true
 
+-- For mobile: horizontal scrolling sidebar
+if isMobile then
+    SidebarScroll.ScrollingDirection = Enum.ScrollingDirection.X
+    SidebarScroll.CanvasSize = UDim2.new(#tabs * 70, 0, 0, 0)
+    SidebarScroll.AutomaticCanvasSize = Enum.AutomaticSize.None
+end
+
 local sideLayout = Instance.new("UIListLayout", SidebarScroll)
-sideLayout.FillDirection = Enum.FillDirection.Vertical
-sideLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-sideLayout.Padding = UDim.new(0, 2)
+if isMobile then
+    sideLayout.FillDirection = Enum.FillDirection.Horizontal
+    sideLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+    sideLayout.Padding = UDim.new(0, 4)
+else
+    sideLayout.FillDirection = Enum.FillDirection.Vertical
+    sideLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    sideLayout.Padding = UDim.new(0, 2)
+end
 
 -- Right content panel
 local RightPanel = Instance.new("Frame", MainContent)
@@ -548,15 +559,6 @@ RightPanel.BackgroundTransparency = 1
 
 local frames = {}
 local tabs = {"Auto Farm", "Farm", "Killer", "Stats", "Auto Gym", "Auto Crystal", "Glitchable Rebirth", "Calculator"}
-
--- For mobile: horizontal scrolling sidebar
-if isMobile then
-    SidebarScroll.CanvasSize = UDim2.new(0, #tabs * 70, 0, 0)
-    SidebarScroll.AutomaticCanvasSize = Enum.AutomaticSize.None
-    sideLayout.FillDirection = Enum.FillDirection.Horizontal
-    sideLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-    sideLayout.Padding = UDim.new(0, 4)
-end
 
 for i, tName in ipairs(tabs) do
     local btn = Instance.new("TextButton", SidebarScroll)
@@ -1783,7 +1785,6 @@ end))
 
 -- ================================
 -- KILL LOGIC (UPDATED: TELEPORT HEAD TO RIGHT HAND + REMOTE PUNCH)
--- REMOVED AUTOMATIC PUNCH EQUIP
 -- ================================
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
