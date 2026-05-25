@@ -879,7 +879,25 @@ autoRebirthInfBtn = createToggle(f1, "Auto Rebirth Inf", function(v)
     if v and states.autoRebirthTarget then states.autoRebirthTarget = false; if SetToggle[autoRebirthTargetBtn] then SetToggle[autoRebirthTargetBtn](false) end end
 end)
 
-createToggle(f1, "Auto Muscle King", function(val) states.autoMuscleKing = val; if val then states.lockedPos = nil; if lockPosBtn and SetToggle[lockPosBtn] then SetToggle[lockPosBtn](false) end end; return val end)
+-- UPDATED: Auto Muscle King now resets velocity when turned off
+createToggle(f1, "Auto Muscle King", function(val)
+    states.autoMuscleKing = val
+    if not val then
+        -- Reset velocity when turning off
+        local char = player.Character
+        if char and char:FindFirstChild("HumanoidRootPart") then
+            local hrp = char.HumanoidRootPart
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.AssemblyAngularVelocity = Vector3.zero
+        end
+    end
+    if val then
+        states.lockedPos = nil
+        if lockPosBtn and SetToggle[lockPosBtn] then SetToggle[lockPosBtn](false) end
+    end
+    return val
+end)
+
 createToggle(f1, "Auto Claim Gift", function(v) states.autoClaim = v end)
 createToggle(f1, "Auto Open Chest", function(v) states.autoChest = v end)
 createToggle(f1, "Auto Punch", function(v) states.autoPunch = v end)
@@ -954,7 +972,7 @@ snackBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- FIXED LOCK POSITION TOGGLE: clears lockedPos when off
+-- UPDATED: Lock Position now resets velocity when turned off
 lockPosBtn = createToggle(f2, "Lock Position", function(val)
     if states.autoMuscleKing and val then return false end
     if val then
@@ -965,6 +983,13 @@ lockPosBtn = createToggle(f2, "Lock Position", function(val)
         end
     else
         states.lockedPos = nil
+        -- Reset velocity when turning off
+        local char = player.Character
+        if char and char:FindFirstChild("HumanoidRootPart") then
+            local hrp = char.HumanoidRootPart
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.AssemblyAngularVelocity = Vector3.zero
+        end
     end
     return val
 end)
@@ -978,9 +1003,6 @@ end)
 -- Freeze Pet functional toggle
 local freezePetBtn = createToggle(f2, "Freeze Pet", function(val)
     states.autoFreezePet = val
-    if not val then
-        -- No additional cleanup needed, loop will stop checking
-    end
     return val
 end)
 
@@ -1003,7 +1025,7 @@ createToggle(f3, "Auto Evil Karma", function(v) states.autoEvilKarma = v; if v t
 ----------------------------------------------------------------
 -- TAB 4: REWORKED STATS & INVENTORY
 ----------------------------------------------------------------
--- (unchanged, same as original)
+-- (unchanged)
 local f4 = frames["Stats"]
 local statsPlayerDD
 local basicDD, advDD, rareDD, epicDD, uniqueDD
@@ -1431,7 +1453,7 @@ createCrystalSection(f6, "--- AURAS ---", auraList, "selectedAuraCrystalData", "
 ----------------------------------------------------------------
 -- TAB 7: GLITCHABLE REBIRTH
 ----------------------------------------------------------------
--- (unchanged, same as original)
+-- (unchanged)
 local f7 = frames["Glitchable Rebirth"]
 
 local glitchRockOptions = {}
@@ -1669,9 +1691,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         end
     end
 end))
-
--- REMOVED the anti-drop tools loop (the one that set CanBeDropped and moved non-allowed tools)
--- The UnEquip Boosts & Drinks toggle already handles removing unwanted tools.
 
 -- God mode, size, fly, walkspeed (respects Less Lag)
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
