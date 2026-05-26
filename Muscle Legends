@@ -83,12 +83,6 @@ local lastStatValues = {}
 local statGains = {}
 local statGainTimes = {}
 
--- Pet/Aura live tracking
-local petItemStates = {}
-local auraItemStates = {}
-local petLastChangeTime = {}
-local auraLastChangeTime = {}
-
 local rockData = {
     ["Tiny Rock"]        = {req = 0,       name = "Tiny Rock",           idx = 1, glitchValue = 0.025},
     ["Punching Rock"]    = {req = 10,      name = "Punching Rock",       idx = 1, glitchValue = 0.05},
@@ -301,54 +295,47 @@ local function getStrength()
     return player.leaderstats and player.leaderstats:FindFirstChild("Strength") and player.leaderstats.Strength.Value or 0
 end
 
--- Improved interact seat finder (searches all machines, finds any interactSeat inside)
-local function findAnyInteractSeat(nearPos)
+-- ================================================================
+-- [AUTO GYM SECTION - HIGHLY IMPROVED]
+-- ================================================================
+
+-- === SUPER IMPROVED SEAT FINDER ===
+local function findBestSeat(nearPos)
     local folder = workspace:FindFirstChild("machinesFolder")
     if not folder then return nil end
+    
     local bestSeat = nil
-    local bestDist = 50
-    for _, machine in ipairs(folder:GetChildren()) do
-        local seat = machine:FindFirstChild("interactSeat")
-        if seat then
-            local machinePos = machine:FindFirstChild("PrimaryPart") or machine:FindFirstChildWhichIsA("BasePart")
-            if machinePos then
-                local dist = (machinePos.Position - nearPos).Magnitude
-                if dist < bestDist then
+    local bestDist = math.huge
+    
+    for _, machine in ipairs(folder:GetDescendants()) do
+        if machine:IsA("Seat") or machine:IsA("VehicleSeat") or 
+           machine.Name:lower():find("seat") or 
+           machine.Name:lower():find("interact") then
+            
+            local rootPart = machine:FindFirstChild("Root") or 
+                            machine:FindFirstChildWhichIsA("BasePart") or 
+                            machine.Parent:FindFirstChildWhichIsA("BasePart")
+            
+            if rootPart then
+                local dist = (rootPart.Position - nearPos).Magnitude
+                if dist < bestDist and dist < 80 then  -- 80 stud radius
                     bestDist = dist
-                    bestSeat = seat
+                    bestSeat = machine
                 end
             end
         end
     end
+    
     return bestSeat
 end
 
--- Find seat by name, fallback to any seat if not found
-local function findInteractSeatByName(gymName, nearPos)
-    local folder = workspace:FindFirstChild("machinesFolder")
-    if not folder then return findAnyInteractSeat(nearPos) end
-    -- First try exact name match
-    for _, machine in ipairs(folder:GetChildren()) do
-        if machine.Name == gymName then
-            local seat = machine:FindFirstChild("interactSeat")
-            if seat then
-                return seat
-            end
-        end
-    end
-    -- Fallback: search all machines for any seat
-    return findAnyInteractSeat(nearPos)
-end
-
--- Fire machine interact remote
+-- Fire machine interact (more reliable)
 local function fireMachineInteract(seat)
     pcall(function()
-        local args = {
-            [1] = "useMachine",
-            [2] = seat,
-        }
+        local args = { [1] = "useMachine", [2] = seat }
         ReplicatedStorage.rEvents.machineInteractRemote:InvokeServer(unpack(args))
     end)
+    task.wait(0.15)
 end
 
 -- Stop auto gym
@@ -360,87 +347,83 @@ local function stopAutoGym()
     states.autoGym = false
 end
 
--- Start auto gym (repeatedly teleports and attempts to sit until seated)
+-- Start auto gym (much more aggressive & smart)
 local function startAutoGym()
     stopAutoGym()
     if not states.selectedMap or not states.selectedGym then return end
+    
     states.autoGym = true
     states.autoGymThread = task.spawn(function()
         while states.autoGym and states.selectedMap and states.selectedGym do
-            local map = gymData[states.selectedMap]
-            if not map then break end
-            local gym = map[states.selectedGym]
+            local mapData = gymData[states.selectedMap]
+            if not mapData then break end
+            local gym = mapData[states.selectedGym]
             if not gym then break end
 
-            -- Strength check
-            local cost = gym.cost
-            if cost and getStrength() < cost then
-                if states.lessLag then task.wait(0.5) else task.wait(0.1) end
+            -- Strength & Muscle King check
+            if gym.cost and getStrength() < gym.cost then
+                task.wait(1)
                 continue
             end
-
-            -- Muscle King check
             if states.selectedMap == "Muscle King Island" and not isLocalPlayerMuscleKing() then
-                if states.lessLag then task.wait(0.5) else task.wait(0.1) end
+                task.wait(1)
                 continue
             end
 
-            local chr = player.Character
-            if not chr or not chr:FindFirstChild("HumanoidRootPart") then
-                task.wait(0.2)
-                continue
-            end
-            local root = chr.HumanoidRootPart
-            local hum = chr:FindFirstChild("Humanoid")
-            if not hum or hum.Health <= 0 then
-                task.wait(0.2)
-                continue
+            local char = player.Character
+            if not char or not char:FindFirstChild("HumanoidRootPart") then 
+                task.wait(0.5) 
+                continue 
             end
             
-            -- If already sitting, we are done for this cycle
+            local root = char.HumanoidRootPart
+            local hum = char:FindFirstChild("Humanoid")
+            if not hum or hum.Health <= 0 then 
+                task.wait(0.5) 
+                continue 
+            end
+
             if hum.Sit then
-                task.wait(0.5)
+                task.wait(1.5)
                 continue
             end
 
-            -- Teleport to gym position
-            root.CFrame = CFrame.new(gym.pos)
+            -- Teleport to gym
+            root.CFrame = CFrame.new(gym.pos + Vector3.new(0, 4, 0))
             root.AssemblyLinearVelocity = Vector3.zero
-            task.wait(0.1)
+            task.wait(0.3)
 
-            -- Find seat
-            local seat = findInteractSeatByName(states.selectedGym, gym.pos)
-            if seat then
-                fireMachineInteract(seat)
-            else
-                fireEKey()
-            end
-
-            -- Wait to sit, but keep trying if not sitting within 1 second
-            local startWait = tick()
-            while states.autoGym and states.selectedGym == gym and tick() - startWait < 5 do
-                if hum.Sit then break end
-                task.wait(0.2)
-                -- If still not sitting, re-teleport and try again
-                if not hum.Sit and tick() - startWait > 1 then
-                    root.CFrame = CFrame.new(gym.pos)
-                    root.AssemblyLinearVelocity = Vector3.zero
-                    if seat then
-                        fireMachineInteract(seat)
-                    else
-                        fireEKey()
-                    end
-                    startWait = tick()
+            -- Try to sit (up to 12 attempts)
+            local success = false
+            for attempt = 1, 12 do
+                if hum.Sit then 
+                    success = true 
+                    break 
+                end
+                
+                local seat = findBestSeat(gym.pos)
+                if seat then
+                    fireMachineInteract(seat)
+                else
+                    fireEKey()
+                end
+                
+                task.wait(0.45)
+                
+                -- Re-teleport every 3 attempts
+                if attempt % 3 == 0 then
+                    root.CFrame = CFrame.new(gym.pos + Vector3.new(0, 4, 0))
+                    task.wait(0.2)
                 end
             end
 
-            task.wait(0.5)
+            task.wait(0.8)
         end
         states.autoGym = false
     end)
 end
 
--- Toggle auto gym
+-- Toggle
 local function toggleAutoGym()
     if states.autoGym then
         stopAutoGym()
@@ -673,24 +656,22 @@ local function createToggle(parent, text, callback)
     return btn
 end
 
--- Confirmation helper for rebirth toggles
-local pendingRebirthConfirm = {}
-local function createConfirmToggle(parent, text, callback)
+-- Confirmation helper for rebirth toggles (1-second timer, not double-click)
+local rebirthConfirmTimers = {}
+local function createRebirthToggle(parent, text, callback)
     local btn = Instance.new("TextButton", parent)
     btn.Size = UDim2.new(1, -10, 0, 30)
     btn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
     btn.Text = text .. " [OFF]"
     btn.TextColor3 = Color3.new(1, 1, 1)
     local state = false
-    local confirmPending = false
-    local confirmTimeout = nil
+    local pendingTimer = nil
     
     local function cancelPending()
-        if confirmTimeout then
-            task.cancel(confirmTimeout)
-            confirmTimeout = nil
+        if pendingTimer then
+            task.cancel(pendingTimer)
+            pendingTimer = nil
         end
-        confirmPending = false
         btn.BackgroundColor3 = state and Color3.fromRGB(0, 120, 0) or Color3.fromRGB(45, 45, 45)
         btn.Text = text .. (state and " [ON]" or " [OFF]")
     end
@@ -702,20 +683,21 @@ local function createConfirmToggle(parent, text, callback)
     end
 
     btn.MouseButton1Click:Connect(function()
-        if not confirmPending then
-            confirmPending = true
-            btn.BackgroundColor3 = Color3.fromRGB(150, 150, 0)
-            btn.Text = text .. " [Click again to confirm]"
-            confirmTimeout = task.spawn(function()
-                task.wait(0.5)
-                cancelPending()
-            end)
-            return
-        else
+        if pendingTimer then
+            -- Second click: cancel and revert
             cancelPending()
-            local newState = not state
-            if callback(newState) == false then newState = false end
-            SetToggle[btn](newState)
+        else
+            -- First click: start 1-second timer
+            btn.BackgroundColor3 = Color3.fromRGB(150, 150, 0)
+            btn.Text = text .. " [Click again to cancel]"
+            pendingTimer = task.spawn(function()
+                task.wait(1)
+                -- Timer finished, activate
+                local newState = not state
+                if callback(newState) == false then newState = false end
+                SetToggle[btn](newState)
+                pendingTimer = nil
+            end)
         end
     end)
     return btn
@@ -923,8 +905,8 @@ local rebBox = Instance.new("TextBox", f1)
 rebBox.Size = UDim2.new(1, -10, 0, 30); rebBox.Text = Config.RebirthTarget; rebBox.PlaceholderText = "Rebirth Target"; rebBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); rebBox.TextColor3 = Color3.new(1, 1, 1)
 rebBox.FocusLost:Connect(function() Config.RebirthTarget = rebBox.Text; SaveConfig() end)
 
--- Auto Rebirth Target with double-click confirmation
-autoRebirthTargetBtn = createConfirmToggle(f1, "Auto Rebirth Target", function(v)
+-- Auto Rebirth Target with 1-second timer confirmation
+autoRebirthTargetBtn = createRebirthToggle(f1, "Auto Rebirth Target", function(v)
     states.autoRebirthTarget = v 
     if v and states.autoRebirthInf then 
         states.autoRebirthInf = false
@@ -933,8 +915,8 @@ autoRebirthTargetBtn = createConfirmToggle(f1, "Auto Rebirth Target", function(v
     return v
 end)
 
--- Auto Rebirth Inf with double-click confirmation
-autoRebirthInfBtn = createConfirmToggle(f1, "Auto Rebirth Inf", function(v) 
+-- Auto Rebirth Inf with 1-second timer confirmation
+autoRebirthInfBtn = createRebirthToggle(f1, "Auto Rebirth Inf", function(v) 
     states.autoRebirthInf = v 
     if v and states.autoRebirthTarget then 
         states.autoRebirthTarget = false
@@ -1079,140 +1061,13 @@ createToggle(f3, "Auto Good Karma", function(v) states.autoGoodKarma = v; if v t
 createToggle(f3, "Auto Evil Karma", function(v) states.autoEvilKarma = v; if v then updateVisibility(true) else checkResetKillAttackTime() end end)
 
 ----------------------------------------------------------------
--- TAB 4: REWORKED STATS & INVENTORY (WITH LIVE UPDATE & MARKERS)
+-- TAB 4: REWORKED STATS & INVENTORY (REVERTED TO SIMPLE VERSION)
 ----------------------------------------------------------------
 local f4 = frames["Stats"]
 local statsPlayerDD
 local basicDD, advDD, rareDD, epicDD, uniqueDD
 local auraBasicDD, auraAdvDD, auraRareDD, auraEpicDD, auraUniqueDD
 local petDetails, auraDetails
-
--- Helper to get a signature for an item (to detect changes)
-local function getItemSignature(item)
-    local data = {
-        xp = item:FindFirstChild("exp") and item.exp.Value or 0,
-        level = item:FindFirstChild("level") and item.level.Value or 1,
-        requiredRebirths = item:FindFirstChild("requiredRebirths") and item.requiredRebirths.Value or 0,
-        evolved = (item:FindFirstChild("Evolved") and item.Evolved.Value) or (item:FindFirstChild("evolved") and item.evolved.Value) or false,
-    }
-    local perks = item:FindFirstChild("perksFolder")
-    if perks then
-        for _, pName in ipairs({"strength", "durability", "agility", "damage"}) do
-            local pObj = perks:FindFirstChild(pName)
-            if pObj then
-                data[pName] = pObj:IsA("ValueBase") and pObj.Value or (pObj:FindFirstChild("Value") and pObj.Value.Value) or 0
-            end
-        end
-    end
-    return HttpService:JSONEncode(data)
-end
-
--- Refresh pet dropdowns with *NEW* and *CHANGED* markers
-local function refreshPetAuraLists(tp)
-    if not tp then return end
-    local petsF = tp:FindFirstChild("petsFolder")
-    local function processFolder(folder, category, refTable, dd, stateTracker, lastChangeTracker)
-        if not folder then
-            dd.refresh({"Nothing Here"})
-            dd.setHeaderText(category .. " Pets v")
-            return
-        end
-        local items = {}
-        local itemMap = {}
-        for _, item in ipairs(folder:GetChildren()) do
-            local name = item.Name
-            local signature = getItemSignature(item)
-            local displayName = name
-            local now = tick()
-            -- Check if new
-            if not stateTracker[name] then
-                stateTracker[name] = {new = true, lastSig = nil, lastChange = now}
-                displayName = name .. " *NEW*"
-            elseif stateTracker[name].new then
-                displayName = name .. " *NEW*"
-            end
-            -- Check if changed
-            if stateTracker[name].lastSig and stateTracker[name].lastSig ~= signature then
-                stateTracker[name].lastChange = now
-                lastChangeTracker[name] = now
-            end
-            if lastChangeTracker[name] and now - lastChangeTracker[name] <= 2 then
-                if displayName:find("*NEW*") then
-                    displayName = name .. " *NEW* *CHANGED*"
-                else
-                    displayName = name .. " *CHANGED*"
-                end
-            elseif lastChangeTracker[name] and now - lastChangeTracker[name] > 2 then
-                lastChangeTracker[name] = nil
-            end
-            stateTracker[name].lastSig = signature
-            items[#items+1] = displayName
-            itemMap[displayName] = item
-        end
-        if #items == 0 then
-            dd.refresh({"Nothing Here"})
-            dd.setHeaderText(category .. " Pets v")
-        else
-            dd.refresh(items)
-            dd.setHeaderText(category .. " Pets v")
-        end
-        return itemMap
-    end
-    
-    local petFolders = {
-        {folder = petsF and petsF:FindFirstChild("Basic"), category = "Basic", ref = petRefsBasic, dd = basicDD, tracker = petItemStatesBasic or {}, changeTracker = petLastChangeBasic or {}},
-        {folder = petsF and petsF:FindFirstChild("Advanced"), category = "Advanced", ref = petRefsAdv, dd = advDD, tracker = petItemStatesAdv or {}, changeTracker = petLastChangeAdv or {}},
-        {folder = petsF and petsF:FindFirstChild("Rare"), category = "Rare", ref = petRefsRare, dd = rareDD, tracker = petItemStatesRare or {}, changeTracker = petLastChangeRare or {}},
-        {folder = petsF and petsF:FindFirstChild("Epic"), category = "Epic", ref = petRefsEpic, dd = epicDD, tracker = petItemStatesEpic or {}, changeTracker = petLastChangeEpic or {}},
-        {folder = petsF and petsF:FindFirstChild("Unique"), category = "Unique", ref = petRefsUnique, dd = uniqueDD, tracker = petItemStatesUnique or {}, changeTracker = petLastChangeUnique or {}},
-    }
-    -- Initialize global trackers if not exist
-    if not petItemStatesBasic then petItemStatesBasic = {} end
-    if not petLastChangeBasic then petLastChangeBasic = {} end
-    -- ... similarly for others; we'll just use globals
-    -- For simplicity, use a single global table keyed by category
-    if not _G.PetTrackers then _G.PetTrackers = {} end
-    if not _G.PetChangeTrackers then _G.PetChangeTrackers = {} end
-    
-    for _, p in ipairs(petFolders) do
-        local cat = p.category
-        if not _G.PetTrackers[cat] then _G.PetTrackers[cat] = {} end
-        if not _G.PetChangeTrackers[cat] then _G.PetChangeTrackers[cat] = {} end
-        local itemMap = processFolder(p.folder, cat, p.ref, p.dd, _G.PetTrackers[cat], _G.PetChangeTrackers[cat])
-        p.ref = itemMap
-    end
-    
-    local powerUpsF = tp:FindFirstChild("powerUpsFolder")
-    local auraFolders = {
-        {folder = powerUpsF and powerUpsF:FindFirstChild("Basic"), category = "Basic", ref = auraRefsBasic, dd = auraBasicDD, tracker = auraTrackersBasic or {}, changeTracker = auraChangeTrackersBasic or {}},
-        {folder = powerUpsF and powerUpsF:FindFirstChild("Advanced"), category = "Advanced", ref = auraRefsAdv, dd = auraAdvDD, tracker = auraTrackersAdv or {}, changeTracker = auraChangeTrackersAdv or {}},
-        {folder = powerUpsF and powerUpsF:FindFirstChild("Rare"), category = "Rare", ref = auraRefsRare, dd = auraRareDD, tracker = auraTrackersRare or {}, changeTracker = auraChangeTrackersRare or {}},
-        {folder = powerUpsF and powerUpsF:FindFirstChild("Epic"), category = "Epic", ref = auraRefsEpic, dd = auraEpicDD, tracker = auraTrackersEpic or {}, changeTracker = auraChangeTrackersEpic or {}},
-        {folder = powerUpsF and powerUpsF:FindFirstChild("Unique"), category = "Unique", ref = auraRefsUnique, dd = auraUniqueDD, tracker = auraTrackersUnique or {}, changeTracker = auraChangeTrackersUnique or {}},
-    }
-    if not _G.AuraTrackers then _G.AuraTrackers = {} end
-    if not _G.AuraChangeTrackers then _G.AuraChangeTrackers = {} end
-    for _, a in ipairs(auraFolders) do
-        local cat = a.category
-        if not _G.AuraTrackers[cat] then _G.AuraTrackers[cat] = {} end
-        if not _G.AuraChangeTrackers[cat] then _G.AuraChangeTrackers[cat] = {} end
-        local itemMap = processFolder(a.folder, cat, a.ref, a.dd, _G.AuraTrackers[cat], _G.AuraChangeTrackers[cat])
-        a.ref = itemMap
-    end
-end
-
--- Start live update loop for stats tab
-table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
-    while true do
-        task.wait(1) -- refresh every second
-        if states.statsTarget then
-            local tp = Players:FindFirstChild(states.statsTarget)
-            if tp then
-                refreshPetAuraLists(tp)
-            end
-        end
-    end
-end))
 
 local function processSpecificFolderItems(folder)
     if not folder then return {"Nothing Here"}, {} end;
@@ -1232,18 +1087,7 @@ end
 
 local function handleItemSelection(label, refTable, detailLabel)
     if not label or label == "Nothing Here" then return end;
-    -- Remove markers from label to get actual item name
-    local cleanLabel = label:gsub(" %*NEW%*", ""):gsub(" %*CHANGED%*", "")
-    local item = refTable[cleanLabel]
-    if not item then
-        -- fallback: try to match by original name without markers
-        for k, v in pairs(refTable) do
-            if k:find(cleanLabel) then
-                item = v
-                break
-            end
-        end
-    end
+    local item = refTable[label] 
     if item then
         local isEvolved = false
         local evObj = item:FindFirstChild("Evolved") or item:FindFirstChild("evolved")
@@ -1268,16 +1112,7 @@ end
 
 local function handleAuraSelection(label, refTable, detailLabel)
     if not label or label == "Nothing Here" then return end;
-    local cleanLabel = label:gsub(" %*NEW%*", ""):gsub(" %*CHANGED%*", "")
-    local item = refTable[cleanLabel]
-    if not item then
-        for k, v in pairs(refTable) do
-            if k:find(cleanLabel) then
-                item = v
-                break
-            end
-        end
-    end
+    local item = refTable[label]
     if item then
         local isEvolved = false
         local evObj = item:FindFirstChild("Evolved") or item:FindFirstChild("evolved")
@@ -1335,7 +1170,19 @@ statsPlayerDD = createDropdown(f4, "Player Dropdown", {}, false, function(label)
         
         local tp = Players:FindFirstChild(newTarget)
         if tp then
-            refreshPetAuraLists(tp)
+            local petsF = tp:FindFirstChild("petsFolder")
+            local oB, rB = processSpecificFolderItems(petsF and petsF:FindFirstChild("Basic")); petRefsBasic = rB; basicDD.refresh(oB)
+            local oA, rA = processSpecificFolderItems(petsF and petsF:FindFirstChild("Advanced")); petRefsAdv = rA; advDD.refresh(oA)
+            local oR, rR = processSpecificFolderItems(petsF and petsF:FindFirstChild("Rare")); petRefsRare = rR; rareDD.refresh(oR)
+            local oE, rE = processSpecificFolderItems(petsF and petsF:FindFirstChild("Epic")); petRefsEpic = rE; epicDD.refresh(oE)
+            local oU, rU = processSpecificFolderItems(petsF and petsF:FindFirstChild("Unique")); petRefsUnique = rU; uniqueDD.refresh(oU)
+            
+            local powerUpsF = tp:FindFirstChild("powerUpsFolder")
+            local oAB, rAB = processAuraItems(powerUpsF and powerUpsF:FindFirstChild("Basic")); auraRefsBasic = rAB; auraBasicDD.refresh(oAB)
+            local oAA, rAA = processAuraItems(powerUpsF and powerUpsF:FindFirstChild("Advanced")); auraRefsAdv = rAA; auraAdvDD.refresh(oAA)
+            local oAR, rAR = processAuraItems(powerUpsF and powerUpsF:FindFirstChild("Rare")); auraRefsRare = rAR; auraRareDD.refresh(oAR)
+            local oAE, rAE = processAuraItems(powerUpsF and powerUpsF:FindFirstChild("Epic")); auraRefsEpic = rAE; auraEpicDD.refresh(oAE)
+            local oAU, rAU = processAuraItems(powerUpsF and powerUpsF:FindFirstChild("Unique")); auraRefsUnique = rAU; auraUniqueDD.refresh(oAU)
         end
     end 
 end)
@@ -1499,11 +1346,11 @@ local function scanCrystalShop()
         local priceFolder = child:FindFirstChild("priceValue")
         if not priceFolder then continue end
         
-        -- FIX: Look for lowercase "priceType" child and filter both "token" and "tokens"
+        -- Look for lowercase "priceType" child and filter tokens
         local priceTypeObj = priceFolder:FindFirstChild("priceType")
         local priceType = priceTypeObj and priceTypeObj:IsA("StringValue") and priceTypeObj.Value or ""
         local lowerType = priceType:lower():gsub("^%s*(.-)%s*$", "%1")
-        if lowerType == "tokens" then
+        if lowerType == "tokens" or lowerType == "token" then
             continue  -- Skip Token items
         end
         
@@ -2156,7 +2003,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Rebirth, Stats, View Player, Pet/Aura refresh (unchanged)
+-- Rebirth, Stats, View Player, Pet/Aura refresh (unchanged - but no pet/aura auto-refresh, only stat numbers update)
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while task.wait() do
         if states.autoRebirthInf then ReplicatedStorage.rEvents.rebirthRemote:InvokeServer("rebirthRequest") end
@@ -2214,8 +2061,27 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                     end
                 end
                 
-                if states.currentPetLabel then if states.currentPetTable == "Basic" then handleItemSelection(states.currentPetLabel, petRefsBasic, petDetails) elseif states.currentPetTable == "Advanced" then handleItemSelection(states.currentPetLabel, petRefsAdv, petDetails) elseif states.currentPetTable == "Rare" then handleItemSelection(states.currentPetLabel, petRefsRare, petDetails) elseif states.currentPetTable == "Epic" then handleItemSelection(states.currentPetLabel, petRefsEpic, petDetails) elseif states.currentPetTable == "Unique" then handleItemSelection(states.currentPetLabel, petRefsUnique, petDetails) end end
-                if states.currentAuraLabel then if states.currentAuraTable == "Basic" then handleAuraSelection(states.currentAuraLabel, auraRefsBasic, auraDetails) elseif states.currentAuraTable == "Advanced" then handleAuraSelection(states.currentAuraLabel, auraRefsAdv, auraDetails) elseif states.currentAuraTable == "Rare" then handleAuraSelection(states.currentAuraLabel, auraRefsRare, auraDetails) elseif states.currentAuraTable == "Epic" then handleAuraSelection(states.currentAuraLabel, auraRefsEpic, auraDetails) elseif states.currentAuraTable == "Unique" then handleAuraSelection(states.currentAuraLabel, auraRefsUnique, auraDetails) end end
+                -- Pet/Aura selection details are static (no auto-refresh, only update when user selects)
+                if states.currentPetLabel then
+                    local petList = petRefsBasic
+                    if states.currentPetTable == "Basic" then petList = petRefsBasic
+                    elseif states.currentPetTable == "Advanced" then petList = petRefsAdv
+                    elseif states.currentPetTable == "Rare" then petList = petRefsRare
+                    elseif states.currentPetTable == "Epic" then petList = petRefsEpic
+                    elseif states.currentPetTable == "Unique" then petList = petRefsUnique
+                    end
+                    handleItemSelection(states.currentPetLabel, petList, petDetails)
+                end
+                if states.currentAuraLabel then
+                    local auraList = auraRefsBasic
+                    if states.currentAuraTable == "Basic" then auraList = auraRefsBasic
+                    elseif states.currentAuraTable == "Advanced" then auraList = auraRefsAdv
+                    elseif states.currentAuraTable == "Rare" then auraList = auraRefsRare
+                    elseif states.currentAuraTable == "Epic" then auraList = auraRefsEpic
+                    elseif states.currentAuraTable == "Unique" then auraList = auraRefsUnique
+                    end
+                    handleAuraSelection(states.currentAuraLabel, auraList, auraDetails)
+                end
                 
                 local uStr, ultF = "", tp:FindFirstChild("ultimatesFolder");
                 if ultF then for _, u in ipairs(ultF:GetChildren()) do uStr = uStr .. u.Name .. ": " .. formatNum(u.Value) .. "\n" end end;
