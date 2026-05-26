@@ -1503,7 +1503,7 @@ local function scanCrystalShop()
         local priceTypeObj = priceFolder:FindFirstChild("priceType")
         local priceType = priceTypeObj and priceTypeObj:IsA("StringValue") and priceTypeObj.Value or ""
         local lowerType = priceType:lower():gsub("^%s*(.-)%s*$", "%1")
-        if lowerType == "Tokens" then
+        if lowerType == "tokens" then
             continue  -- Skip Token items
         end
         
