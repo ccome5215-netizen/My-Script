@@ -72,8 +72,7 @@ local states = {
     selectedAuraCrystal = nil, selectedAuraCrystalData = nil,
     autoPetBuy = false, autoPetBuyThread = nil,
     autoAuraBuy = false, autoAuraBuyThread = nil,
-    autoUnequipBoosts = false,
-    autoFreezePet = false
+    autoUnequipBoosts = false
 }
 
 local rockCache = {}
@@ -83,6 +82,12 @@ local toggleHand = false
 local lastStatValues = {}
 local statGains = {}
 local statGainTimes = {}
+
+-- Pet/Aura live tracking
+local petItemStates = {}
+local auraItemStates = {}
+local petLastChangeTime = {}
+local auraLastChangeTime = {}
 
 local rockData = {
     ["Tiny Rock"]        = {req = 0,       name = "Tiny Rock",           idx = 1, glitchValue = 0.025},
@@ -668,6 +673,54 @@ local function createToggle(parent, text, callback)
     return btn
 end
 
+-- Confirmation helper for rebirth toggles
+local pendingRebirthConfirm = {}
+local function createConfirmToggle(parent, text, callback)
+    local btn = Instance.new("TextButton", parent)
+    btn.Size = UDim2.new(1, -10, 0, 30)
+    btn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    btn.Text = text .. " [OFF]"
+    btn.TextColor3 = Color3.new(1, 1, 1)
+    local state = false
+    local confirmPending = false
+    local confirmTimeout = nil
+    
+    local function cancelPending()
+        if confirmTimeout then
+            task.cancel(confirmTimeout)
+            confirmTimeout = nil
+        end
+        confirmPending = false
+        btn.BackgroundColor3 = state and Color3.fromRGB(0, 120, 0) or Color3.fromRGB(45, 45, 45)
+        btn.Text = text .. (state and " [ON]" or " [OFF]")
+    end
+    
+    SetToggle[btn] = function(newState)
+        state = newState
+        btn.Text = text .. (state and " [ON]" or " [OFF]")
+        btn.BackgroundColor3 = state and Color3.fromRGB(0, 120, 0) or Color3.fromRGB(45, 45, 45)
+    end
+
+    btn.MouseButton1Click:Connect(function()
+        if not confirmPending then
+            confirmPending = true
+            btn.BackgroundColor3 = Color3.fromRGB(150, 150, 0)
+            btn.Text = text .. " [Click again to confirm]"
+            confirmTimeout = task.spawn(function()
+                task.wait(0.5)
+                cancelPending()
+            end)
+            return
+        else
+            cancelPending()
+            local newState = not state
+            if callback(newState) == false then newState = false end
+            SetToggle[btn](newState)
+        end
+    end)
+    return btn
+end
+
 local function createDropdown(parent, text, options, multi, callback, checkStateFunc)
     local container = Instance.new("Frame", parent)
     container.Size = UDim2.new(1, -10, 0, 30)
@@ -870,20 +923,30 @@ local rebBox = Instance.new("TextBox", f1)
 rebBox.Size = UDim2.new(1, -10, 0, 30); rebBox.Text = Config.RebirthTarget; rebBox.PlaceholderText = "Rebirth Target"; rebBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); rebBox.TextColor3 = Color3.new(1, 1, 1)
 rebBox.FocusLost:Connect(function() Config.RebirthTarget = rebBox.Text; SaveConfig() end)
 
-autoRebirthTargetBtn = createToggle(f1, "Auto Rebirth Target", function(v)
+-- Auto Rebirth Target with double-click confirmation
+autoRebirthTargetBtn = createConfirmToggle(f1, "Auto Rebirth Target", function(v)
     states.autoRebirthTarget = v 
-    if v and states.autoRebirthInf then states.autoRebirthInf = false; if SetToggle[autoRebirthInfBtn] then SetToggle[autoRebirthInfBtn](false) end end
+    if v and states.autoRebirthInf then 
+        states.autoRebirthInf = false
+        if SetToggle[autoRebirthInfBtn] then SetToggle[autoRebirthInfBtn](false) end 
+    end
+    return v
 end)
-autoRebirthInfBtn = createToggle(f1, "Auto Rebirth Inf", function(v) 
+
+-- Auto Rebirth Inf with double-click confirmation
+autoRebirthInfBtn = createConfirmToggle(f1, "Auto Rebirth Inf", function(v) 
     states.autoRebirthInf = v 
-    if v and states.autoRebirthTarget then states.autoRebirthTarget = false; if SetToggle[autoRebirthTargetBtn] then SetToggle[autoRebirthTargetBtn](false) end end
+    if v and states.autoRebirthTarget then 
+        states.autoRebirthTarget = false
+        if SetToggle[autoRebirthTargetBtn] then SetToggle[autoRebirthTargetBtn](false) end 
+    end
+    return v
 end)
 
 -- UPDATED: Auto Muscle King now resets velocity when turned off
 createToggle(f1, "Auto Muscle King", function(val)
     states.autoMuscleKing = val
     if not val then
-        -- Reset velocity when turning off
         local char = player.Character
         if char and char:FindFirstChild("HumanoidRootPart") then
             local hrp = char.HumanoidRootPart
@@ -983,7 +1046,6 @@ lockPosBtn = createToggle(f2, "Lock Position", function(val)
         end
     else
         states.lockedPos = nil
-        -- Reset velocity when turning off
         local char = player.Character
         if char and char:FindFirstChild("HumanoidRootPart") then
             local hrp = char.HumanoidRootPart
@@ -997,12 +1059,6 @@ end)
 -- UnEquip Boosts & Drinks toggle
 local unequipBoostsBtn = createToggle(f2, "UnEquip Boosts & Drinks", function(val)
     states.autoUnequipBoosts = val
-    return val
-end)
-
--- Freeze Pet functional toggle
-local freezePetBtn = createToggle(f2, "Freeze Pet", function(val)
-    states.autoFreezePet = val
     return val
 end)
 
@@ -1023,14 +1079,140 @@ createToggle(f3, "Auto Good Karma", function(v) states.autoGoodKarma = v; if v t
 createToggle(f3, "Auto Evil Karma", function(v) states.autoEvilKarma = v; if v then updateVisibility(true) else checkResetKillAttackTime() end end)
 
 ----------------------------------------------------------------
--- TAB 4: REWORKED STATS & INVENTORY
+-- TAB 4: REWORKED STATS & INVENTORY (WITH LIVE UPDATE & MARKERS)
 ----------------------------------------------------------------
--- (unchanged)
 local f4 = frames["Stats"]
 local statsPlayerDD
 local basicDD, advDD, rareDD, epicDD, uniqueDD
 local auraBasicDD, auraAdvDD, auraRareDD, auraEpicDD, auraUniqueDD
 local petDetails, auraDetails
+
+-- Helper to get a signature for an item (to detect changes)
+local function getItemSignature(item)
+    local data = {
+        xp = item:FindFirstChild("exp") and item.exp.Value or 0,
+        level = item:FindFirstChild("level") and item.level.Value or 1,
+        requiredRebirths = item:FindFirstChild("requiredRebirths") and item.requiredRebirths.Value or 0,
+        evolved = (item:FindFirstChild("Evolved") and item.Evolved.Value) or (item:FindFirstChild("evolved") and item.evolved.Value) or false,
+    }
+    local perks = item:FindFirstChild("perksFolder")
+    if perks then
+        for _, pName in ipairs({"strength", "durability", "agility", "damage"}) do
+            local pObj = perks:FindFirstChild(pName)
+            if pObj then
+                data[pName] = pObj:IsA("ValueBase") and pObj.Value or (pObj:FindFirstChild("Value") and pObj.Value.Value) or 0
+            end
+        end
+    end
+    return HttpService:JSONEncode(data)
+end
+
+-- Refresh pet dropdowns with *NEW* and *CHANGED* markers
+local function refreshPetAuraLists(tp)
+    if not tp then return end
+    local petsF = tp:FindFirstChild("petsFolder")
+    local function processFolder(folder, category, refTable, dd, stateTracker, lastChangeTracker)
+        if not folder then
+            dd.refresh({"Nothing Here"})
+            dd.setHeaderText(category .. " Pets v")
+            return
+        end
+        local items = {}
+        local itemMap = {}
+        for _, item in ipairs(folder:GetChildren()) do
+            local name = item.Name
+            local signature = getItemSignature(item)
+            local displayName = name
+            local now = tick()
+            -- Check if new
+            if not stateTracker[name] then
+                stateTracker[name] = {new = true, lastSig = nil, lastChange = now}
+                displayName = name .. " *NEW*"
+            elseif stateTracker[name].new then
+                displayName = name .. " *NEW*"
+            end
+            -- Check if changed
+            if stateTracker[name].lastSig and stateTracker[name].lastSig ~= signature then
+                stateTracker[name].lastChange = now
+                lastChangeTracker[name] = now
+            end
+            if lastChangeTracker[name] and now - lastChangeTracker[name] <= 2 then
+                if displayName:find("*NEW*") then
+                    displayName = name .. " *NEW* *CHANGED*"
+                else
+                    displayName = name .. " *CHANGED*"
+                end
+            elseif lastChangeTracker[name] and now - lastChangeTracker[name] > 2 then
+                lastChangeTracker[name] = nil
+            end
+            stateTracker[name].lastSig = signature
+            items[#items+1] = displayName
+            itemMap[displayName] = item
+        end
+        if #items == 0 then
+            dd.refresh({"Nothing Here"})
+            dd.setHeaderText(category .. " Pets v")
+        else
+            dd.refresh(items)
+            dd.setHeaderText(category .. " Pets v")
+        end
+        return itemMap
+    end
+    
+    local petFolders = {
+        {folder = petsF and petsF:FindFirstChild("Basic"), category = "Basic", ref = petRefsBasic, dd = basicDD, tracker = petItemStatesBasic or {}, changeTracker = petLastChangeBasic or {}},
+        {folder = petsF and petsF:FindFirstChild("Advanced"), category = "Advanced", ref = petRefsAdv, dd = advDD, tracker = petItemStatesAdv or {}, changeTracker = petLastChangeAdv or {}},
+        {folder = petsF and petsF:FindFirstChild("Rare"), category = "Rare", ref = petRefsRare, dd = rareDD, tracker = petItemStatesRare or {}, changeTracker = petLastChangeRare or {}},
+        {folder = petsF and petsF:FindFirstChild("Epic"), category = "Epic", ref = petRefsEpic, dd = epicDD, tracker = petItemStatesEpic or {}, changeTracker = petLastChangeEpic or {}},
+        {folder = petsF and petsF:FindFirstChild("Unique"), category = "Unique", ref = petRefsUnique, dd = uniqueDD, tracker = petItemStatesUnique or {}, changeTracker = petLastChangeUnique or {}},
+    }
+    -- Initialize global trackers if not exist
+    if not petItemStatesBasic then petItemStatesBasic = {} end
+    if not petLastChangeBasic then petLastChangeBasic = {} end
+    -- ... similarly for others; we'll just use globals
+    -- For simplicity, use a single global table keyed by category
+    if not _G.PetTrackers then _G.PetTrackers = {} end
+    if not _G.PetChangeTrackers then _G.PetChangeTrackers = {} end
+    
+    for _, p in ipairs(petFolders) do
+        local cat = p.category
+        if not _G.PetTrackers[cat] then _G.PetTrackers[cat] = {} end
+        if not _G.PetChangeTrackers[cat] then _G.PetChangeTrackers[cat] = {} end
+        local itemMap = processFolder(p.folder, cat, p.ref, p.dd, _G.PetTrackers[cat], _G.PetChangeTrackers[cat])
+        p.ref = itemMap
+    end
+    
+    local powerUpsF = tp:FindFirstChild("powerUpsFolder")
+    local auraFolders = {
+        {folder = powerUpsF and powerUpsF:FindFirstChild("Basic"), category = "Basic", ref = auraRefsBasic, dd = auraBasicDD, tracker = auraTrackersBasic or {}, changeTracker = auraChangeTrackersBasic or {}},
+        {folder = powerUpsF and powerUpsF:FindFirstChild("Advanced"), category = "Advanced", ref = auraRefsAdv, dd = auraAdvDD, tracker = auraTrackersAdv or {}, changeTracker = auraChangeTrackersAdv or {}},
+        {folder = powerUpsF and powerUpsF:FindFirstChild("Rare"), category = "Rare", ref = auraRefsRare, dd = auraRareDD, tracker = auraTrackersRare or {}, changeTracker = auraChangeTrackersRare or {}},
+        {folder = powerUpsF and powerUpsF:FindFirstChild("Epic"), category = "Epic", ref = auraRefsEpic, dd = auraEpicDD, tracker = auraTrackersEpic or {}, changeTracker = auraChangeTrackersEpic or {}},
+        {folder = powerUpsF and powerUpsF:FindFirstChild("Unique"), category = "Unique", ref = auraRefsUnique, dd = auraUniqueDD, tracker = auraTrackersUnique or {}, changeTracker = auraChangeTrackersUnique or {}},
+    }
+    if not _G.AuraTrackers then _G.AuraTrackers = {} end
+    if not _G.AuraChangeTrackers then _G.AuraChangeTrackers = {} end
+    for _, a in ipairs(auraFolders) do
+        local cat = a.category
+        if not _G.AuraTrackers[cat] then _G.AuraTrackers[cat] = {} end
+        if not _G.AuraChangeTrackers[cat] then _G.AuraChangeTrackers[cat] = {} end
+        local itemMap = processFolder(a.folder, cat, a.ref, a.dd, _G.AuraTrackers[cat], _G.AuraChangeTrackers[cat])
+        a.ref = itemMap
+    end
+end
+
+-- Start live update loop for stats tab
+table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
+    while true do
+        task.wait(1) -- refresh every second
+        if states.statsTarget then
+            local tp = Players:FindFirstChild(states.statsTarget)
+            if tp then
+                refreshPetAuraLists(tp)
+            end
+        end
+    end
+end))
 
 local function processSpecificFolderItems(folder)
     if not folder then return {"Nothing Here"}, {} end;
@@ -1050,7 +1232,18 @@ end
 
 local function handleItemSelection(label, refTable, detailLabel)
     if not label or label == "Nothing Here" then return end;
-    local item = refTable[label] 
+    -- Remove markers from label to get actual item name
+    local cleanLabel = label:gsub(" %*NEW%*", ""):gsub(" %*CHANGED%*", "")
+    local item = refTable[cleanLabel]
+    if not item then
+        -- fallback: try to match by original name without markers
+        for k, v in pairs(refTable) do
+            if k:find(cleanLabel) then
+                item = v
+                break
+            end
+        end
+    end
     if item then
         local isEvolved = false
         local evObj = item:FindFirstChild("Evolved") or item:FindFirstChild("evolved")
@@ -1075,7 +1268,16 @@ end
 
 local function handleAuraSelection(label, refTable, detailLabel)
     if not label or label == "Nothing Here" then return end;
-    local item = refTable[label]
+    local cleanLabel = label:gsub(" %*NEW%*", ""):gsub(" %*CHANGED%*", "")
+    local item = refTable[cleanLabel]
+    if not item then
+        for k, v in pairs(refTable) do
+            if k:find(cleanLabel) then
+                item = v
+                break
+            end
+        end
+    end
     if item then
         local isEvolved = false
         local evObj = item:FindFirstChild("Evolved") or item:FindFirstChild("evolved")
@@ -1133,19 +1335,7 @@ statsPlayerDD = createDropdown(f4, "Player Dropdown", {}, false, function(label)
         
         local tp = Players:FindFirstChild(newTarget)
         if tp then
-            local petsF = tp:FindFirstChild("petsFolder")
-            local oB, rB = processSpecificFolderItems(petsF and petsF:FindFirstChild("Basic")); petRefsBasic = rB; basicDD.refresh(oB)
-            local oA, rA = processSpecificFolderItems(petsF and petsF:FindFirstChild("Advanced")); petRefsAdv = rA; advDD.refresh(oA)
-            local oR, rR = processSpecificFolderItems(petsF and petsF:FindFirstChild("Rare")); petRefsRare = rR; rareDD.refresh(oR)
-            local oE, rE = processSpecificFolderItems(petsF and petsF:FindFirstChild("Epic")); petRefsEpic = rE; epicDD.refresh(oE)
-            local oU, rU = processSpecificFolderItems(petsF and petsF:FindFirstChild("Unique")); petRefsUnique = rU; uniqueDD.refresh(oU)
-            
-            local powerUpsF = tp:FindFirstChild("powerUpsFolder")
-            local oAB, rAB = processAuraItems(powerUpsF and powerUpsF:FindFirstChild("Basic")); auraRefsBasic = rAB; auraBasicDD.refresh(oAB)
-            local oAA, rAA = processAuraItems(powerUpsF and powerUpsF:FindFirstChild("Advanced")); auraRefsAdv = rAA; auraAdvDD.refresh(oAA)
-            local oAR, rAR = processAuraItems(powerUpsF and powerUpsF:FindFirstChild("Rare")); auraRefsRare = rAR; auraRareDD.refresh(oAR)
-            local oAE, rAE = processAuraItems(powerUpsF and powerUpsF:FindFirstChild("Epic")); auraRefsEpic = rAE; auraEpicDD.refresh(oAE)
-            local oAU, rAU = processAuraItems(powerUpsF and powerUpsF:FindFirstChild("Unique")); auraRefsUnique = rAU; auraUniqueDD.refresh(oAU)
+            refreshPetAuraLists(tp)
         end
     end 
 end)
@@ -1308,10 +1498,14 @@ local function scanCrystalShop()
     for _, child in ipairs(folder:GetChildren()) do
         local priceFolder = child:FindFirstChild("priceValue")
         if not priceFolder then continue end
-        -- Skip Tokens
-        local priceTypeObj = priceFolder:FindFirstChild("PriceType")
+        
+        -- FIX: Look for lowercase "priceType" child and filter both "token" and "tokens"
+        local priceTypeObj = priceFolder:FindFirstChild("priceType")
         local priceType = priceTypeObj and priceTypeObj:IsA("StringValue") and priceTypeObj.Value or ""
-        if priceType == "Tokens" then continue end
+        local lowerType = priceType:lower():gsub("^%s*(.-)%s*$", "%1")
+        if lowerType == "Tokens" then
+            continue  -- Skip Token items
+        end
         
         local imageId = ""
         local imageObj = child:FindFirstChild("imageValue")
@@ -1419,6 +1613,7 @@ local function createCrystalSection(parent, title, list, stateKeyData, stateKeyN
         fireBuyCrystal(data)
     end)
     
+    -- Buy 5 now instant (no delay)
     local buy5Btn = Instance.new("TextButton", parent)
     buy5Btn.Size = UDim2.new(1, -10, 0, 35)
     buy5Btn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
@@ -1429,7 +1624,6 @@ local function createCrystalSection(parent, title, list, stateKeyData, stateKeyN
         if not data then return end
         for _ = 1, 5 do
             fireBuyCrystal(data)
-            task.wait(0.05)
         end
     end)
     
@@ -1453,7 +1647,6 @@ createCrystalSection(f6, "--- AURAS ---", auraList, "selectedAuraCrystalData", "
 ----------------------------------------------------------------
 -- TAB 7: GLITCHABLE REBIRTH
 ----------------------------------------------------------------
--- (unchanged)
 local f7 = frames["Glitchable Rebirth"]
 
 local glitchRockOptions = {}
@@ -1663,30 +1856,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                 if bp then
                     pcall(function() tool.Parent = bp end)
                 end
-            end
-        end
-    end
-end))
-
--- Freeze Pet loop (functional)
-table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
-    while true do
-        task.wait(0.5) -- scan every 0.5 seconds
-        if not states.autoFreezePet then continue end
-        -- Search workspace for any instance with the player's name
-        local playerName = player.Name
-        local target = nil
-        -- Look for a model or part that is likely the pet (named after player)
-        for _, obj in ipairs(workspace:GetDescendants()) do
-            if obj.Name == playerName and obj:IsA("Model") then
-                target = obj
-                break
-            end
-        end
-        if target then
-            local movementScript = target:FindFirstChild("petMovementScript")
-            if movementScript then
-                movementScript:Destroy()
             end
         end
     end
