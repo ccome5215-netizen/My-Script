@@ -374,8 +374,8 @@ local function startAutoGym()
                 continue
             end
 
-            -- If already sitting, wait until unsit
-            if hum.Sit then
+            -- If already sitting, wait until unsit (SAFE CHECK ADDED)
+            if hum and hum.Sit then
                 task.wait()
                 continue
             end
@@ -387,7 +387,7 @@ local function startAutoGym()
 
             -- Aggressive sit attempt until seated
             local attempts = 0
-            while states.autoGym and not hum.Sit do
+            while states.autoGym and hum and not hum.Sit do
                 local seat = findBestSeat(gym.pos)
                 if seat then
                     fireMachineInteract(seat)
@@ -401,8 +401,8 @@ local function startAutoGym()
                 end
             end
 
-            -- Wait until unsit
-            while states.autoGym and hum.Sit do
+            -- Wait until unsit (SAFE CHECK ADDED)
+            while states.autoGym and hum and hum.Sit do
                 task.wait()
             end
         end
