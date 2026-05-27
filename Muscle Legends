@@ -290,6 +290,17 @@ local function isLocalPlayerMuscleKing()
     return mkLabel.Text == "Muscle King: " .. player.Name
 end
 
+-- Check if Muscle King text says "None" (nobody is MK)
+local function isMuscleKingNone()
+    local mkPart = workspace:FindFirstChild("currentMuscleKingPart")
+    if not mkPart then return true end -- no part means no MK
+    local mkGui = mkPart:FindFirstChild("currentMuscleKingGui")
+    if not mkGui then return true end
+    local mkLabel = mkGui:FindFirstChild("currentMuscleKingLabel")
+    if not mkLabel or not mkLabel:IsA("TextLabel") then return true end
+    return mkLabel.Text == "Muscle King: None"
+end
+
 -- Get strength
 local function getStrength()
     return player.leaderstats and player.leaderstats:FindFirstChild("Strength") and player.leaderstats.Strength.Value or 0
@@ -352,14 +363,17 @@ local function startAutoGym()
             local gym = mapData[states.selectedGym]
             if not gym then break end
 
-            -- Strength & Muscle King checks
+            -- Strength check
             if gym.cost and getStrength() < gym.cost then
                 task.wait()
                 continue
             end
-            if states.selectedMap == "Muscle King Island" and not isLocalPlayerMuscleKing() then
-                task.wait()
-                continue
+            -- Muscle King check: only block if someone else is MK and not local player and not "None"
+            if states.selectedMap == "Muscle King Island" then
+                if not isLocalPlayerMuscleKing() and not isMuscleKingNone() then
+                    task.wait()
+                    continue
+                end
             end
 
             local char = player.Character
@@ -374,7 +388,7 @@ local function startAutoGym()
                 continue
             end
 
-            -- If already sitting, wait until unsit (SAFE CHECK ADDED)
+            -- If already sitting, wait until unsit
             if hum and hum.Sit then
                 task.wait()
                 continue
@@ -394,14 +408,14 @@ local function startAutoGym()
                 else
                     fireEKey()
                 end
-                task.wait()  -- minimal delay to not flood
+                task.wait()
                 attempts = attempts + 1
                 if attempts % 5 == 0 then
                     root.CFrame = CFrame.new(gym.pos + Vector3.new(0, 4, 0))
                 end
             end
 
-            -- Wait until unsit (SAFE CHECK ADDED)
+            -- Wait until unsit
             while states.autoGym and hum and hum.Sit do
                 task.wait()
             end
@@ -565,7 +579,7 @@ else
 end
 
 local frames = {}
-local tabs = {"Auto Farm", "Farm", "Killer", "Stats", "Auto Gym", "Auto Crystal", "Glitchable Rebirth", "Calculator"}
+local tabs = {"Auto Farm", "Farm", "Killer", "Stats", "Auto Gym", "Auto Crystal", "Glitchable Rebirth", "Calculator", "Teleport"}
 
 if isMobile then
     SidebarScroll.CanvasSize = UDim2.new(0, #tabs * 75, 0, 0)
@@ -1024,6 +1038,18 @@ end)
 local smallHopBtn = Instance.new("TextButton", f2); smallHopBtn.Size = UDim2.new(1, -10, 0, 35); smallHopBtn.Text = "Small Server Hop"; smallHopBtn.BackgroundColor3 = Color3.fromRGB(40, 60, 60); smallHopBtn.TextColor3 = Color3.new(1, 1, 1); smallHopBtn.MouseButton1Click:Connect(function() ServerHop("Small") end)
 local largeHopBtn = Instance.new("TextButton", f2); largeHopBtn.Size = UDim2.new(1, -10, 0, 35); largeHopBtn.Text = "Large Server Hop"; largeHopBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40); largeHopBtn.TextColor3 = Color3.new(1, 1, 1); largeHopBtn.MouseButton1Click:Connect(function() ServerHop("Large") end)
 
+-- Rejoin button
+local rejoinBtn = Instance.new("TextButton", f2)
+rejoinBtn.Size = UDim2.new(1, -10, 0, 35)
+rejoinBtn.Text = "Rejoin"
+rejoinBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 60)
+rejoinBtn.TextColor3 = Color3.new(1, 1, 1)
+rejoinBtn.MouseButton1Click:Connect(function()
+    pcall(function()
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, player)
+    end)
+end)
+
 ----------------------------------------------------------------
 -- TAB 3: KILLER
 ----------------------------------------------------------------
@@ -1252,7 +1278,7 @@ gymDD = createDropdown(f5, "Select Gym", {"Select map first"}, false, function(g
     states.selectedGym = realName
 end)
 
--- Gym button (same aggressive logic as auto gym)
+-- Gym button (same aggressive logic as auto gym, also updated MK check)
 local gymBtn = Instance.new("TextButton", f5)
 gymBtn.Size = UDim2.new(1, -10, 0, 35)
 gymBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
@@ -1264,7 +1290,9 @@ gymBtn.MouseButton1Click:Connect(function()
     if not gym then return end
     local cost = gym.cost
     if cost and getStrength() < cost then return end
-    if states.selectedMap == "Muscle King Island" and not isLocalPlayerMuscleKing() then return end
+    if states.selectedMap == "Muscle King Island" then
+        if not isLocalPlayerMuscleKing() and not isMuscleKingNone() then return end
+    end
     local chr = player.Character
     if not chr or not chr:FindFirstChild("HumanoidRootPart") then return end
     local hum = chr:FindFirstChild("Humanoid")
@@ -1282,7 +1310,7 @@ gymBtn.MouseButton1Click:Connect(function()
             else
                 fireEKey()
             end
-            task.wait()  -- minimal delay
+            task.wait()
         end
     end)
 end)
@@ -1314,12 +1342,11 @@ local function scanCrystalShop()
         local priceFolder = child:FindFirstChild("priceValue")
         if not priceFolder then continue end
         
-        -- Look for lowercase "priceType" child and filter tokens
         local priceTypeObj = priceFolder:FindFirstChild("priceType")
         local priceType = priceTypeObj and priceTypeObj:IsA("StringValue") and priceTypeObj.Value or ""
         local lowerType = priceType:lower():gsub("^%s*(.-)%s*$", "%1")
         if lowerType == "tokens" or lowerType == "token" then
-            continue  -- Skip Token items
+            continue
         end
         
         local imageId = ""
@@ -1635,6 +1662,48 @@ calcBtn.MouseButton1Click:Connect(function()
 end)
 
 ----------------------------------------------------------------
+-- TAB 9: TELEPORT (CLEAN DROPDOWN + BUTTON)
+----------------------------------------------------------------
+local f9 = frames["Teleport"]
+
+local teleportPositions = {
+    ["Safe Spot"] = Vector3.new(218.565002, 41.153748, -8129.369629),
+    ["Tiny Island"] = Vector3.new(-33.693745, 7.456870, 1892.807007),
+    ["Beach"] = Vector3.new(4.466469, 7.303733, 132.878891),
+    ["Frozen Island"] = Vector3.new(-2623.022217, 7.303728, -409.073334),
+    ["Mystic Island"] = Vector3.new(2250.778076, 7.303732, 1073.226685),
+    ["Inferno Island"] = Vector3.new(-6758.963867, 7.303741, -1284.918701),
+    ["Legends Island"] = Vector3.new(4603.281738, 991.481750, -3897.865723),
+    ["Muscle King Island"] = Vector3.new(-8625.929688, 17.153761, -5730.473145),
+    ["Jungle Island"] = Vector3.new(-8685.621094, 6.732735, 2392.326660)
+}
+
+local teleportNames = {}
+for name, _ in pairs(teleportPositions) do
+    table.insert(teleportNames, name)
+end
+
+local selectedTeleport = nil
+local teleportDropdown = createDropdown(f9, "Select Location", teleportNames, false, function(name)
+    selectedTeleport = name
+end)
+
+local teleportBtn = Instance.new("TextButton", f9)
+teleportBtn.Size = UDim2.new(1, -10, 0, 35)
+teleportBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
+teleportBtn.Text = "Teleport"
+teleportBtn.TextColor3 = Color3.new(1, 1, 1)
+teleportBtn.MouseButton1Click:Connect(function()
+    if not selectedTeleport then return end
+    local pos = teleportPositions[selectedTeleport]
+    if not pos then return end
+    local char = player.Character
+    if char and char:FindFirstChild("HumanoidRootPart") then
+        char.HumanoidRootPart.CFrame = CFrame.new(pos)
+    end
+end)
+
+----------------------------------------------------------------
 -- MAIN LOOPS
 ----------------------------------------------------------------
 -- Auto Muscle King: constant teleport, no position check, no velocity reset
@@ -1649,6 +1718,34 @@ table.insert(getgenv().ML_Expert_Loops, RunService.Heartbeat:Connect(function()
         local char = player.Character
         if char and char:FindFirstChild("HumanoidRootPart") then
             char.HumanoidRootPart.CFrame = states.lockedPos
+        end
+    end
+end))
+
+-- Walk on water (invisible platform following player)
+table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
+    local waterPart = workspace:FindFirstChild("underSea")
+    if not waterPart or not waterPart:IsA("BasePart") then return end
+    local waterY = waterPart.Position.Y
+
+    local platform = Instance.new("Part")
+    platform.Name = "ML_WalkOnWaterPlatform"
+    platform.Size = Vector3.new(10, 1, 10)
+    platform.Anchored = true
+    platform.CanCollide = true
+    platform.Transparency = 1
+    platform.Parent = workspace
+
+    -- Cleanup old platform if exists
+    local old = workspace:FindFirstChild("ML_WalkOnWaterPlatform")
+    if old and old ~= platform then old:Destroy() end
+
+    while true do
+        task.wait(0.05)
+        local char = player.Character
+        if char and char:FindFirstChild("HumanoidRootPart") then
+            local root = char.HumanoidRootPart
+            platform.CFrame = CFrame.new(root.Position.X, waterY, root.Position.Z)
         end
     end
 end))
@@ -1840,13 +1937,11 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             if punchTool then punchTool:Activate() end
 
         elseif states.selectedMethod == "NonTeleport" then 
-            -- Rapidly alternate hands (no delay)
             local currentHand = toggleHand and "Left" or "Right"
             local targetHand = char:FindFirstChild(currentHand .. "Hand") or char:FindFirstChild(currentHand .. " Arm")
-            toggleHand = not toggleHand  -- toggle every iteration
+            toggleHand = not toggleHand
             
             if targetHand then 
-                -- Store rock properties once
                 if not rockCache[actualRockPart] then 
                     rockCache[actualRockPart] = {
                         Size = actualRockPart.Size, 
@@ -1856,24 +1951,18 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                     } 
                 end
                 
-                -- Force rock to be not collidable, not anchored (will be moved manually)
                 actualRockPart.CanCollide = false
                 actualRockPart.Anchored = false
                 
-                -- Adjust rock size (min 0.5, max 2) based on player size
                 local mySize = player:FindFirstChild("customSize") and player.customSize.Value or tonumber(Config.SizeValue) or 1
                 local newSize = math.min(2, math.max(0.5, mySize / 2))
                 actualRockPart.Size = Vector3.new(newSize, newSize, newSize)
                 
-                -- Constantly teleport rock to hand (no offset)
                 actualRockPart.CFrame = targetHand.CFrame
-                
-                -- Zero out velocities to prevent physics from moving it
                 actualRockPart.AssemblyLinearVelocity = Vector3.zero
                 actualRockPart.AssemblyAngularVelocity = Vector3.zero
             end
             
-            -- Fire remote for the current hand (alternating)
             local handToFire = toggleHand and "leftHand" or "rightHand"
             pcall(function()
                 player.muscleEvent:FireServer("punch", handToFire)
@@ -1893,7 +1982,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Kill logic (no attackTime modification, only Head teleport and remote)
+-- Kill logic
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
