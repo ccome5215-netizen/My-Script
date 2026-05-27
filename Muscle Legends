@@ -96,7 +96,7 @@ local rockData = {
     ["Jungle Rock"]      = {req = 10000000,name = "Ancient Jungle Rock", idx = 1, glitchValue = 16.25}
 }
 
--- Gym data (unchanged)
+-- Gym data
 local gymData = {
     ["Tiny Island"] = {
         ["Bench Press"] = {pos = Vector3.new(67.105286, 6.714245, 1984.269043), cost = 10},
@@ -296,46 +296,39 @@ local function getStrength()
 end
 
 -- ================================================================
--- [AUTO GYM SECTION - HIGHLY IMPROVED]
+-- [AUTO GYM SECTION - IMPROVED]
 -- ================================================================
 
--- === SUPER IMPROVED SEAT FINDER ===
+-- Find the best interact seat near a position
 local function findBestSeat(nearPos)
     local folder = workspace:FindFirstChild("machinesFolder")
     if not folder then return nil end
-    
     local bestSeat = nil
     local bestDist = math.huge
-    
     for _, machine in ipairs(folder:GetDescendants()) do
-        if machine:IsA("Seat") or machine:IsA("VehicleSeat") or 
-           machine.Name:lower():find("seat") or 
-           machine.Name:lower():find("interact") then
-            
-            local rootPart = machine:FindFirstChild("Root") or 
-                            machine:FindFirstChildWhichIsA("BasePart") or 
+        if machine:IsA("Seat") or machine:IsA("VehicleSeat") or
+           machine.Name:lower():find("seat") or machine.Name:lower():find("interact") then
+            local rootPart = machine:FindFirstChild("Root") or
+                            machine:FindFirstChildWhichIsA("BasePart") or
                             machine.Parent:FindFirstChildWhichIsA("BasePart")
-            
             if rootPart then
                 local dist = (rootPart.Position - nearPos).Magnitude
-                if dist < bestDist and dist < 80 then  -- 80 stud radius
+                if dist < bestDist and dist < 80 then
                     bestDist = dist
                     bestSeat = machine
                 end
             end
         end
     end
-    
     return bestSeat
 end
 
--- Fire machine interact (more reliable)
+-- Fire machine interact remote (more robust)
 local function fireMachineInteract(seat)
     pcall(function()
         local args = { [1] = "useMachine", [2] = seat }
         ReplicatedStorage.rEvents.machineInteractRemote:InvokeServer(unpack(args))
     end)
-    task.wait(0.15)
 end
 
 -- Stop auto gym
@@ -347,11 +340,10 @@ local function stopAutoGym()
     states.autoGym = false
 end
 
--- Start auto gym (much more aggressive & smart)
+-- Start auto gym (aggressive, no fixed delays)
 local function startAutoGym()
     stopAutoGym()
     if not states.selectedMap or not states.selectedGym then return end
-    
     states.autoGym = true
     states.autoGymThread = task.spawn(function()
         while states.autoGym and states.selectedMap and states.selectedGym do
@@ -360,70 +352,65 @@ local function startAutoGym()
             local gym = mapData[states.selectedGym]
             if not gym then break end
 
-            -- Strength & Muscle King check
+            -- Strength & Muscle King checks
             if gym.cost and getStrength() < gym.cost then
-                task.wait(1)
+                task.wait()
                 continue
             end
             if states.selectedMap == "Muscle King Island" and not isLocalPlayerMuscleKing() then
-                task.wait(1)
+                task.wait()
                 continue
             end
 
             local char = player.Character
-            if not char or not char:FindFirstChild("HumanoidRootPart") then 
-                task.wait(0.5) 
-                continue 
+            if not char or not char:FindFirstChild("HumanoidRootPart") then
+                task.wait()
+                continue
             end
-            
             local root = char.HumanoidRootPart
             local hum = char:FindFirstChild("Humanoid")
-            if not hum or hum.Health <= 0 then 
-                task.wait(0.5) 
-                continue 
-            end
-
-            if hum.Sit then
-                task.wait(1.5)
+            if not hum or hum.Health <= 0 then
+                task.wait()
                 continue
             end
 
-            -- Teleport to gym
+            -- If already sitting, wait until unsit
+            if hum.Sit then
+                task.wait()
+                continue
+            end
+
+            -- Teleport to gym position (slightly above)
             root.CFrame = CFrame.new(gym.pos + Vector3.new(0, 4, 0))
             root.AssemblyLinearVelocity = Vector3.zero
-            task.wait(0.3)
+            task.wait()
 
-            -- Try to sit (up to 12 attempts)
-            local success = false
-            for attempt = 1, 12 do
-                if hum.Sit then 
-                    success = true 
-                    break 
-                end
-                
+            -- Aggressive sit attempt until seated
+            local attempts = 0
+            while states.autoGym and not hum.Sit do
                 local seat = findBestSeat(gym.pos)
                 if seat then
                     fireMachineInteract(seat)
                 else
                     fireEKey()
                 end
-                
-                task.wait(0.45)
-                
-                -- Re-teleport every 3 attempts
-                if attempt % 3 == 0 then
+                task.wait()  -- minimal delay to not flood
+                attempts = attempts + 1
+                if attempts % 5 == 0 then
                     root.CFrame = CFrame.new(gym.pos + Vector3.new(0, 4, 0))
-                    task.wait(0.2)
                 end
             end
 
-            task.wait(0.8)
+            -- Wait until unsit
+            while states.autoGym and hum.Sit do
+                task.wait()
+            end
         end
         states.autoGym = false
     end)
 end
 
--- Toggle
+-- Toggle auto gym
 local function toggleAutoGym()
     if states.autoGym then
         stopAutoGym()
@@ -657,7 +644,6 @@ local function createToggle(parent, text, callback)
 end
 
 -- Confirmation helper for rebirth toggles (1-second timer, not double-click)
-local rebirthConfirmTimers = {}
 local function createRebirthToggle(parent, text, callback)
     local btn = Instance.new("TextButton", parent)
     btn.Size = UDim2.new(1, -10, 0, 30)
@@ -684,15 +670,12 @@ local function createRebirthToggle(parent, text, callback)
 
     btn.MouseButton1Click:Connect(function()
         if pendingTimer then
-            -- Second click: cancel and revert
             cancelPending()
         else
-            -- First click: start 1-second timer
             btn.BackgroundColor3 = Color3.fromRGB(150, 150, 0)
             btn.Text = text .. " [Click again to cancel]"
             pendingTimer = task.spawn(function()
                 task.wait(1)
-                -- Timer finished, activate
                 local newState = not state
                 if callback(newState) == false then newState = false end
                 SetToggle[btn](newState)
@@ -905,7 +888,6 @@ local rebBox = Instance.new("TextBox", f1)
 rebBox.Size = UDim2.new(1, -10, 0, 30); rebBox.Text = Config.RebirthTarget; rebBox.PlaceholderText = "Rebirth Target"; rebBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); rebBox.TextColor3 = Color3.new(1, 1, 1)
 rebBox.FocusLost:Connect(function() Config.RebirthTarget = rebBox.Text; SaveConfig() end)
 
--- Auto Rebirth Target with 1-second timer confirmation
 autoRebirthTargetBtn = createRebirthToggle(f1, "Auto Rebirth Target", function(v)
     states.autoRebirthTarget = v 
     if v and states.autoRebirthInf then 
@@ -915,7 +897,6 @@ autoRebirthTargetBtn = createRebirthToggle(f1, "Auto Rebirth Target", function(v
     return v
 end)
 
--- Auto Rebirth Inf with 1-second timer confirmation
 autoRebirthInfBtn = createRebirthToggle(f1, "Auto Rebirth Inf", function(v) 
     states.autoRebirthInf = v 
     if v and states.autoRebirthTarget then 
@@ -925,7 +906,6 @@ autoRebirthInfBtn = createRebirthToggle(f1, "Auto Rebirth Inf", function(v)
     return v
 end)
 
--- UPDATED: Auto Muscle King now resets velocity when turned off
 createToggle(f1, "Auto Muscle King", function(val)
     states.autoMuscleKing = val
     if not val then
@@ -994,7 +974,6 @@ local copyPosBtn = Instance.new("TextButton", f2)
 copyPosBtn.Size = UDim2.new(1, -10, 0, 35); copyPosBtn.Text = "Copy My Position"; copyPosBtn.BackgroundColor3 = Color3.fromRGB(40, 60, 60); copyPosBtn.TextColor3 = Color3.new(1, 1, 1)
 copyPosBtn.MouseButton1Click:Connect(function() if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then local pos = player.Character.HumanoidRootPart.Position; pcall(function() setclipboard(string.format("%f, %f, %f", pos.X, pos.Y, pos.Z)) end) end end)
 
--- UPDATED Eat All Snacks: skip Protein Egg
 local snackBtn = Instance.new("TextButton", f2)
 snackBtn.Size = UDim2.new(1, -10, 0, 35); snackBtn.Text = "Eat All Snacks"; snackBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40); snackBtn.TextColor3 = Color3.new(1, 1, 1)
 snackBtn.MouseButton1Click:Connect(function()
@@ -1017,7 +996,6 @@ snackBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- UPDATED: Lock Position now resets velocity when turned off
 lockPosBtn = createToggle(f2, "Lock Position", function(val)
     if states.autoMuscleKing and val then return false end
     if val then
@@ -1038,7 +1016,6 @@ lockPosBtn = createToggle(f2, "Lock Position", function(val)
     return val
 end)
 
--- UnEquip Boosts & Drinks toggle
 local unequipBoostsBtn = createToggle(f2, "UnEquip Boosts & Drinks", function(val)
     states.autoUnequipBoosts = val
     return val
@@ -1275,7 +1252,7 @@ gymDD = createDropdown(f5, "Select Gym", {"Select map first"}, false, function(g
     states.selectedGym = realName
 end)
 
--- Gym button (improved: teleport then repeatedly attempt to sit)
+-- Gym button (same aggressive logic as auto gym)
 local gymBtn = Instance.new("TextButton", f5)
 gymBtn.Size = UDim2.new(1, -10, 0, 35)
 gymBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
@@ -1293,32 +1270,23 @@ gymBtn.MouseButton1Click:Connect(function()
     local hum = chr:FindFirstChild("Humanoid")
     if hum and hum.Sit then return end
     
-    -- Teleport to gym position
-    chr.HumanoidRootPart.CFrame = CFrame.new(gym.pos)
+    -- Teleport to gym
+    chr.HumanoidRootPart.CFrame = CFrame.new(gym.pos + Vector3.new(0, 4, 0))
     chr.HumanoidRootPart.AssemblyLinearVelocity = Vector3.zero
     
-    -- Try to find seat and interact, repeating until sitting or timeout
     task.spawn(function()
-        local startTime = tick()
-        while tick() - startTime < 10 do
-            if hum and hum.Sit then break end
-            local seat = findInteractSeatByName(states.selectedGym, gym.pos)
+        while hum and not hum.Sit do
+            local seat = findBestSeat(gym.pos)
             if seat then
                 fireMachineInteract(seat)
             else
                 fireEKey()
             end
-            task.wait(0.5)
-            -- Re-teleport occasionally to ensure proximity
-            if tick() - startTime > 1 and (not hum or not hum.Sit) then
-                chr.HumanoidRootPart.CFrame = CFrame.new(gym.pos)
-                chr.HumanoidRootPart.AssemblyLinearVelocity = Vector3.zero
-            end
+            task.wait()  -- minimal delay
         end
     end)
 end)
 
--- Auto Gym toggle
 local autoGymBtn = createToggle(f5, "Auto Gym", function(val)
     if val then
         if not states.selectedMap or not states.selectedGym then return false end
@@ -1460,7 +1428,6 @@ local function createCrystalSection(parent, title, list, stateKeyData, stateKeyN
         fireBuyCrystal(data)
     end)
     
-    -- Buy 5 now instant (no delay)
     local buy5Btn = Instance.new("TextButton", parent)
     buy5Btn.Size = UDim2.new(1, -10, 0, 35)
     buy5Btn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
@@ -1686,7 +1653,7 @@ table.insert(getgenv().ML_Expert_Loops, RunService.Heartbeat:Connect(function()
     end
 end))
 
--- UnEquip Boosts & Drinks loop (no delay)
+-- UnEquip Boosts & Drinks loop
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     local allowedWorkoutTools = {
         ["Punch"] = true, ["Weight"] = true, ["Stomp"] = true,
@@ -1753,7 +1720,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Weight Glue Logic (unchanged)
+-- Weight Glue Logic
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         task.wait()
@@ -1794,7 +1761,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Auto Equip Tool (unchanged)
+-- Auto Equip Tool
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
@@ -1843,7 +1810,9 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Auto Glitch loop (unchanged)
+-- ================================
+-- DEDICATED AUTO GLITCH LOOP (UPDATED: NO DELAY, RAPID HAND SWITCH, ROCK STAYS ON HAND)
+-- ================================
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         task.wait()
@@ -1871,10 +1840,13 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             if punchTool then punchTool:Activate() end
 
         elseif states.selectedMethod == "NonTeleport" then 
+            -- Rapidly alternate hands (no delay)
             local currentHand = toggleHand and "Left" or "Right"
             local targetHand = char:FindFirstChild(currentHand .. "Hand") or char:FindFirstChild(currentHand .. " Arm")
-            toggleHand = not toggleHand
+            toggleHand = not toggleHand  -- toggle every iteration
+            
             if targetHand then 
+                -- Store rock properties once
                 if not rockCache[actualRockPart] then 
                     rockCache[actualRockPart] = {
                         Size = actualRockPart.Size, 
@@ -1883,22 +1855,29 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                         Anchored = actualRockPart.Anchored
                     } 
                 end
+                
+                -- Force rock to be not collidable, not anchored (will be moved manually)
                 actualRockPart.CanCollide = false
                 actualRockPart.Anchored = false
+                
+                -- Adjust rock size (min 0.5, max 2) based on player size
                 local mySize = player:FindFirstChild("customSize") and player.customSize.Value or tonumber(Config.SizeValue) or 1
                 local newSize = math.min(2, math.max(0.5, mySize / 2))
                 actualRockPart.Size = Vector3.new(newSize, newSize, newSize)
+                
+                -- Constantly teleport rock to hand (no offset)
                 actualRockPart.CFrame = targetHand.CFrame
+                
+                -- Zero out velocities to prevent physics from moving it
                 actualRockPart.AssemblyLinearVelocity = Vector3.zero
                 actualRockPart.AssemblyAngularVelocity = Vector3.zero
             end
+            
+            -- Fire remote for the current hand (alternating)
+            local handToFire = toggleHand and "leftHand" or "rightHand"
             pcall(function()
-                local args1 = { [1] = "punch", [2] = "leftHand" }
-                player.muscleEvent:FireServer(unpack(args1))
-                local args2 = { [1] = "punch", [2] = "rightHand" }
-                player.muscleEvent:FireServer(unpack(args2))
+                player.muscleEvent:FireServer("punch", handToFire)
             end)
-            task.wait(0.05)
         end
 
         if not states.autoGlitchTrain then 
@@ -1956,7 +1935,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Auto Chest, Auto Lift, Auto Claim, Auto Fortune Wheel, Rebirth/Stats, Player list, Anti-AFK, Fast Punch/Auto Punch (unchanged)
+-- Auto Chest
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while task.wait(1) do
         if states.autoChest then
@@ -1970,6 +1949,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
+-- Auto Lift No Anim
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function() 
     while true do 
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end 
@@ -1977,6 +1957,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end 
 end))
 
+-- Auto Claim Gift
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while task.wait(1) do
         if states.autoClaim then
@@ -1989,6 +1970,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
+-- Auto Fortune Wheel
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while task.wait(1) do
         if states.autoFortuneWheel then
@@ -2003,7 +1985,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Rebirth, Stats, View Player, Pet/Aura refresh (unchanged - but no pet/aura auto-refresh, only stat numbers update)
+-- Rebirth, Stats, View Player, Pet/Aura refresh
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while task.wait() do
         if states.autoRebirthInf then ReplicatedStorage.rEvents.rebirthRemote:InvokeServer("rebirthRequest") end
@@ -2061,7 +2043,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                     end
                 end
                 
-                -- Pet/Aura selection details are static (no auto-refresh, only update when user selects)
                 if states.currentPetLabel then
                     local petList = petRefsBasic
                     if states.currentPetTable == "Basic" then petList = petRefsBasic
@@ -2096,6 +2077,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
+-- Player list refresh
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while task.wait(1) do 
         local killList, statsList, currentMap = {}, {}, {}
@@ -2114,6 +2096,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
+-- Anti-AFK
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while task.wait(600) do
         pcall(function()
@@ -2124,7 +2107,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Fast Punch / Auto Punch / Accel Reps (no kill attackTime modification)
+-- Fast Punch / Auto Punch / Accel Reps
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
