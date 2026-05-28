@@ -657,47 +657,49 @@ local function createToggle(parent, text, callback)
     return btn
 end
 
--- Confirmation helper for rebirth toggles (1-second timer, not double-click)
-local function createRebirthToggle(parent, text, callback)
-    local btn = Instance.new("TextButton", parent)
-    btn.Size = UDim2.new(1, -10, 0, 30)
-    btn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-    btn.Text = text .. " [OFF]"
-    btn.TextColor3 = Color3.new(1, 1, 1)
-    local state = false
-    local pendingTimer = nil
-    
-    local function cancelPending()
-        if pendingTimer then
-            task.cancel(pendingTimer)
-            pendingTimer = nil
-        end
-        btn.BackgroundColor3 = state and Color3.fromRGB(0, 120, 0) or Color3.fromRGB(45, 45, 45)
-        btn.Text = text .. (state and " [ON]" or " [OFF]")
-    end
-    
-    SetToggle[btn] = function(newState)
-        state = newState
-        btn.Text = text .. (state and " [ON]" or " [OFF]")
-        btn.BackgroundColor3 = state and Color3.fromRGB(0, 120, 0) or Color3.fromRGB(45, 45, 45)
-    end
+-- Confirm popup helper
+local function createConfirmPopup(message, onConfirm)
+    local popup = Instance.new("Frame", ScreenGui)
+    popup.Size = UDim2.fromOffset(280, 120)
+    popup.Position = UDim2.new(0.5, -140, 0.5, -60)
+    popup.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+    popup.BorderSizePixel = 0
+    popup.ZIndex = 100
+    Instance.new("UICorner", popup).CornerRadius = UDim.new(0, 8)
 
-    btn.MouseButton1Click:Connect(function()
-        if pendingTimer then
-            cancelPending()
-        else
-            btn.BackgroundColor3 = Color3.fromRGB(150, 150, 0)
-            btn.Text = text .. " [Click again to cancel]"
-            pendingTimer = task.spawn(function()
-                task.wait(1)
-                local newState = not state
-                if callback(newState) == false then newState = false end
-                SetToggle[btn](newState)
-                pendingTimer = nil
-            end)
-        end
+    local label = Instance.new("TextLabel", popup)
+    label.Size = UDim2.new(1, -20, 0, 50)
+    label.Position = UDim2.fromOffset(10, 10)
+    label.Text = message
+    label.TextColor3 = Color3.new(1, 1, 1)
+    label.TextWrapped = true
+    label.BackgroundTransparency = 1
+    label.ZIndex = 101
+
+    local btnWidth = 120
+    local yesBtn = Instance.new("TextButton", popup)
+    yesBtn.Size = UDim2.fromOffset(btnWidth, 35)
+    yesBtn.Position = UDim2.fromOffset(10, 70)
+    yesBtn.Text = "Yes"
+    yesBtn.BackgroundColor3 = Color3.fromRGB(0, 140, 0)
+    yesBtn.TextColor3 = Color3.new(1, 1, 1)
+    yesBtn.ZIndex = 101
+    yesBtn.MouseButton1Click:Connect(function()
+        popup:Destroy()
+        onConfirm(true)
     end)
-    return btn
+
+    local noBtn = Instance.new("TextButton", popup)
+    noBtn.Size = UDim2.fromOffset(btnWidth, 35)
+    noBtn.Position = UDim2.fromOffset(280 - 10 - btnWidth, 70)
+    noBtn.Text = "No"
+    noBtn.BackgroundColor3 = Color3.fromRGB(140, 0, 0)
+    noBtn.TextColor3 = Color3.new(1, 1, 1)
+    noBtn.ZIndex = 101
+    noBtn.MouseButton1Click:Connect(function()
+        popup:Destroy()
+        onConfirm(false)
+    end)
 end
 
 local function createDropdown(parent, text, options, multi, callback, checkStateFunc)
@@ -902,23 +904,59 @@ local rebBox = Instance.new("TextBox", f1)
 rebBox.Size = UDim2.new(1, -10, 0, 30); rebBox.Text = Config.RebirthTarget; rebBox.PlaceholderText = "Rebirth Target"; rebBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); rebBox.TextColor3 = Color3.new(1, 1, 1)
 rebBox.FocusLost:Connect(function() Config.RebirthTarget = rebBox.Text; SaveConfig() end)
 
-autoRebirthTargetBtn = createRebirthToggle(f1, "Auto Rebirth Target", function(v)
-    states.autoRebirthTarget = v 
-    if v and states.autoRebirthInf then 
-        states.autoRebirthInf = false
-        if SetToggle[autoRebirthInfBtn] then SetToggle[autoRebirthInfBtn](false) end 
-    end
-    return v
-end)
+-- NEW: Rebirth toggles with confirm popup when turning ON
+do
+    local function createRebirthConfirmToggle(parent, text, stateKey, otherStateKey, otherBtn)
+        local btn = Instance.new("TextButton", parent)
+        btn.Size = UDim2.new(1, -10, 0, 30)
+        btn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+        btn.Text = text .. " [OFF]"
+        btn.TextColor3 = Color3.new(1, 1, 1)
 
-autoRebirthInfBtn = createRebirthToggle(f1, "Auto Rebirth Inf", function(v) 
-    states.autoRebirthInf = v 
-    if v and states.autoRebirthTarget then 
-        states.autoRebirthTarget = false
-        if SetToggle[autoRebirthTargetBtn] then SetToggle[autoRebirthTargetBtn](false) end 
+        local state = false
+
+        local function updateVisual()
+            btn.Text = text .. (state and " [ON]" or " [OFF]")
+            btn.BackgroundColor3 = state and Color3.fromRGB(0, 120, 0) or Color3.fromRGB(45, 45, 45)
+        end
+
+        SetToggle[btn] = function(newState)
+            state = newState
+            updateVisual()
+        end
+
+        btn.MouseButton1Click:Connect(function()
+            if state then
+                -- Turn off immediately
+                state = false
+                updateVisual()
+                states[stateKey] = false
+                -- No confirm popup, just toggle off
+            else
+                -- Turn on: show confirm popup
+                createConfirmPopup("Are you sure you want to activate " .. text .. "?", function(confirmed)
+                    if confirmed then
+                        state = true
+                        updateVisual()
+                        states[stateKey] = true
+                        -- If the other is on, turn it off
+                        if states[otherStateKey] then
+                            states[otherStateKey] = false
+                            if otherBtn and SetToggle[otherBtn] then SetToggle[otherBtn](false) end
+                        end
+                    end
+                end)
+            end
+        end)
+
+        return btn
     end
-    return v
-end)
+
+    -- Auto Rebirth Target
+    autoRebirthTargetBtn = createRebirthConfirmToggle(f1, "Auto Rebirth Target", "autoRebirthTarget", "autoRebirthInf", autoRebirthInfBtn)
+    -- Auto Rebirth Inf
+    autoRebirthInfBtn = createRebirthConfirmToggle(f1, "Auto Rebirth Inf", "autoRebirthInf", "autoRebirthTarget", autoRebirthTargetBtn)
+end
 
 createToggle(f1, "Auto Muscle King", function(val)
     states.autoMuscleKing = val
@@ -1486,23 +1524,21 @@ createCrystalSection(f6, "--- PETS ---", petList, "selectedPetCrystalData", "sel
 createCrystalSection(f6, "--- AURAS ---", auraList, "selectedAuraCrystalData", "selectedAuraCrystal", states.autoAuraBuy, startAutoAuraBuy, stopAutoAuraBuy)
 
 ----------------------------------------------------------------
--- TAB 7: GLITCHABLE REBIRTH
+-- TAB 7: GLITCHABLE REBIRTH (ROCK DROPDOWN NOW MATCHES AUTO FARM)
 ----------------------------------------------------------------
 local f7 = frames["Glitchable Rebirth"]
 
-local glitchRockOptions = {}
-for name, data in pairs(rockData) do
-    table.insert(glitchRockOptions, name .. " (" .. data.glitchValue .. ")")
+-- Plain rock names, like Auto Farm
+local rockNames = {}
+for name, _ in pairs(rockData) do
+    table.insert(rockNames, name)
 end
 
 local selectedGlitchRock = nil
 local expGivesResult = nil
 
-local glitchRockDD = createDropdown(f7, "Rock Dropdown", glitchRockOptions, false, function(v)
-    local rockName = v:match("^(.-) %(")
-    if rockName and rockData[rockName] then
-        selectedGlitchRock = rockName
-    end
+local glitchRockDD = createDropdown(f7, "Rock Dropdown", rockNames, false, function(v)
+    selectedGlitchRock = v
     expGivesResult = nil
     _G.GlitchExpGivesLabel.Text = "EXP GIVES: N/A"
     _G.GlitchGlitchableLabel.Text = "GLITCHABLE?: N/A"
