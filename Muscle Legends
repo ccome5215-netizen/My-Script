@@ -1430,9 +1430,7 @@ local function scanCrystalShop()
         end
     end
     
-    -- ============================================================
-    -- CHANGED: Sort by rarity A-Z instead of cost
-    -- ============================================================
+    -- Sort by rarity A-Z instead of cost
     table.sort(pets, function(a, b) return a.rarity < b.rarity end)
     table.sort(auras, function(a, b) return a.rarity < b.rarity end)
     
@@ -1971,6 +1969,36 @@ loadBtn.MouseButton1Click:Connect(function()
             startAutoGym()
         end
     end
+end)
+
+-- ================================================================
+-- NEW: REMOVE CONFIG BUTTON
+-- ================================================================
+local removeConfigBtn = Instance.new("TextButton", f10)
+removeConfigBtn.Size = UDim2.new(1, -10, 0, 35)
+removeConfigBtn.Text = "Remove Config"
+removeConfigBtn.BackgroundColor3 = Color3.fromRGB(120, 40, 40)
+removeConfigBtn.TextColor3 = Color3.new(1, 1, 1)
+removeConfigBtn.MouseButton1Click:Connect(function()
+    if not selectedConfigName or selectedConfigName == "No saved configs" or not savedConfigs[selectedConfigName] then
+        return
+    end
+    createConfirmPopup("Are you sure you want to delete config \"" .. selectedConfigName .. "\"?", function(confirmed)
+        if confirmed then
+            savedConfigs[selectedConfigName] = nil
+            pcall(function() writefile(configFilePath, HttpService:JSONEncode(savedConfigs)) end)
+            
+            -- Update dropdown options
+            local newNames = {}
+            for n, _ in pairs(savedConfigs) do table.insert(newNames, n) end
+            if #newNames == 0 then table.insert(newNames, "No saved configs") end
+            configDropdown.refresh(newNames)
+            
+            -- Reset selection
+            selectedConfigName = nil
+            configDropdown.setHeaderText("Saved Config v")
+        end
+    end)
 end)
 
 ----------------------------------------------------------------
