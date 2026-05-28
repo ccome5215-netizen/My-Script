@@ -73,7 +73,7 @@ local states = {
     autoPetBuy = false, autoPetBuyThread = nil,
     autoAuraBuy = false, autoAuraBuyThread = nil,
     autoUnequipBoosts = false,
-    stopEverything = false -- NEW: Stop Everything toggle
+    stopEverything = false
 }
 
 local rockCache = {}
@@ -83,6 +83,13 @@ local toggleHand = false
 local lastStatValues = {}
 local statGains = {}
 local statGainTimes = {}
+
+-- Toggle button storage for Load Config
+local toggleButtons = {}
+-- Dropdown setter storage for Load Config
+local dropdownSetters = {}
+-- Dropdown header setter storage
+local dropdownHeaderSetters = {}
 
 local rockData = {
     ["Tiny Rock"]        = {req = 0,       name = "Tiny Rock",           idx = 1, glitchValue = 0.025},
@@ -271,7 +278,6 @@ local function handleGlitchCleanup(method, callback)
     end
 end
 
--- Fire E key
 local function fireEKey()
     pcall(function()
         VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, nil)
@@ -280,7 +286,6 @@ local function fireEKey()
     end)
 end
 
--- Check if local player is current Muscle King
 local function isLocalPlayerMuscleKing()
     local mkPart = workspace:FindFirstChild("currentMuscleKingPart")
     if not mkPart then return false end
@@ -291,10 +296,9 @@ local function isLocalPlayerMuscleKing()
     return mkLabel.Text == "Muscle King: " .. player.Name
 end
 
--- Check if Muscle King text says "None" (nobody is MK)
 local function isMuscleKingNone()
     local mkPart = workspace:FindFirstChild("currentMuscleKingPart")
-    if not mkPart then return true end -- no part means no MK
+    if not mkPart then return true end
     local mkGui = mkPart:FindFirstChild("currentMuscleKingGui")
     if not mkGui then return true end
     local mkLabel = mkGui:FindFirstChild("currentMuscleKingLabel")
@@ -302,16 +306,14 @@ local function isMuscleKingNone()
     return mkLabel.Text == "Muscle King: None"
 end
 
--- Get strength
 local function getStrength()
     return player.leaderstats and player.leaderstats:FindFirstChild("Strength") and player.leaderstats.Strength.Value or 0
 end
 
 -- ================================================================
--- [AUTO GYM SECTION - IMPROVED]
+-- AUTO GYM SECTION
 -- ================================================================
 
--- Find the best interact seat near a position
 local function findBestSeat(nearPos)
     local folder = workspace:FindFirstChild("machinesFolder")
     if not folder then return nil end
@@ -335,7 +337,6 @@ local function findBestSeat(nearPos)
     return bestSeat
 end
 
--- Fire machine interact remote (more robust)
 local function fireMachineInteract(seat)
     pcall(function()
         local args = { [1] = "useMachine", [2] = seat }
@@ -343,7 +344,6 @@ local function fireMachineInteract(seat)
     end)
 end
 
--- Stop auto gym
 local function stopAutoGym()
     if states.autoGymThread then
         pcall(task.cancel, states.autoGymThread)
@@ -352,7 +352,6 @@ local function stopAutoGym()
     states.autoGym = false
 end
 
--- Start auto gym (aggressive, no fixed delays)
 local function startAutoGym()
     stopAutoGym()
     if not states.selectedMap or not states.selectedGym then return end
@@ -365,12 +364,10 @@ local function startAutoGym()
             local gym = mapData[states.selectedGym]
             if not gym then break end
 
-            -- Strength check
             if gym.cost and getStrength() < gym.cost then
                 task.wait()
                 continue
             end
-            -- Muscle King check: only block if someone else is MK and not local player and not "None"
             if states.selectedMap == "Muscle King Island" then
                 if not isLocalPlayerMuscleKing() and not isMuscleKingNone() then
                     task.wait()
@@ -390,18 +387,15 @@ local function startAutoGym()
                 continue
             end
 
-            -- If already sitting, wait until unsit
             if hum and hum.Sit then
                 task.wait()
                 continue
             end
 
-            -- Teleport to gym position (slightly above)
             root.CFrame = CFrame.new(gym.pos + Vector3.new(0, 4, 0))
             root.AssemblyLinearVelocity = Vector3.zero
             task.wait()
 
-            -- Aggressive sit attempt until seated
             local attempts = 0
             while states.autoGym and hum and not hum.Sit do
                 if states.stopEverything then break end
@@ -418,7 +412,6 @@ local function startAutoGym()
                 end
             end
 
-            -- Wait until unsit
             while states.autoGym and hum and hum.Sit do
                 if states.stopEverything then break end
                 task.wait()
@@ -428,16 +421,6 @@ local function startAutoGym()
     end)
 end
 
--- Toggle auto gym
-local function toggleAutoGym()
-    if states.autoGym then
-        stopAutoGym()
-    else
-        startAutoGym()
-    end
-end
-
--- Crystal buy helpers
 local function fireBuyCrystal(data)
     if not data then return end
     pcall(function()
@@ -532,13 +515,11 @@ else
     end)
 end
 
--- Main container below title
 local MainContent = Instance.new("Frame", MainFrame)
 MainContent.Size = UDim2.new(1, 0, 1, -30)
 MainContent.Position = UDim2.fromOffset(0, 30)
 MainContent.BackgroundTransparency = 1
 
--- Left sidebar / Top mobile panel
 local LeftPanel = Instance.new("Frame", MainContent)
 local RightPanel = Instance.new("Frame", MainContent)
 
@@ -641,13 +622,15 @@ end
 -- UI COMPONENTS HELPER
 ----------------------------------------------------------------
 local SetToggle = {}
-local function createToggle(parent, text, callback)
+local function createToggle(parent, text, key, callback)
     local btn = Instance.new("TextButton", parent)
     btn.Size = UDim2.new(1, -10, 0, 30)
     btn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
     btn.Text = text .. " [OFF]"
     btn.TextColor3 = Color3.new(1, 1, 1)
     local state = false
+    
+    if key then toggleButtons[key] = btn end
     
     SetToggle[btn] = function(newState)
         state = newState
@@ -663,7 +646,6 @@ local function createToggle(parent, text, callback)
     return btn
 end
 
--- Confirm popup helper
 local function createConfirmPopup(message, onConfirm)
     local popup = Instance.new("Frame", ScreenGui)
     popup.Size = UDim2.fromOffset(280, 120)
@@ -784,13 +766,23 @@ local function createDropdown(parent, text, options, multi, callback, checkState
         list.CanvasSize = UDim2.new(0, 0, 0, #options * 25)
     end
     refresh()
-    return { refresh = refresh, setHeaderText = function(txt) headerText.Text = txt end }
+    return { 
+        refresh = refresh, 
+        setHeaderText = function(txt) headerText.Text = txt end,
+        setValue = function(val)
+            if not multi then
+                headerText.Text = tostring(val) .. " v"
+                callback(val)
+            end
+        end,
+        optionsList = options -- for checking valid values
+    }
 end
 
-local lockPosBtn, autoRebirthTargetBtn, autoRebirthInfBtn, trackBtn
+local lockPosBtn, autoRebirthTargetBtn, autoRebirthInfBtn, trackToggle
 
 ----------------------------------------------------------------
--- KILL VISIBILITY (removed)
+-- KILL VISIBILITY
 ----------------------------------------------------------------
 local function updateVisibility(isInvisible) end
 local function checkResetKillAttackTime()
@@ -804,11 +796,16 @@ end
 -- TAB 1: AUTO FARM
 ----------------------------------------------------------------
 local f1 = frames["Auto Farm"]
-createDropdown(f1, "Select Rock", {"Tiny Rock", "Punching Rock", "Large Rock", "Golden Rock", "Frozen Rock", "Mystic Rock", "Inferno Rock", "Legend Rock", "Muscle King Rock", "Jungle Rock"}, false, function(v) 
+
+-- Select Rock dropdown
+local selectRockDD = createDropdown(f1, "Select Rock", {"Tiny Rock", "Punching Rock", "Large Rock", "Golden Rock", "Frozen Rock", "Mystic Rock", "Inferno Rock", "Legend Rock", "Muscle King Rock", "Jungle Rock"}, false, function(v) 
     if states.autoGlitch then handleGlitchCleanup(states.selectedMethod, function() states.selectedRock = v end) else states.selectedRock = v end
 end)
+dropdownSetters["selectRock"] = selectRockDD
+dropdownHeaderSetters["selectRock"] = selectRockDD
 
-createDropdown(f1, "Select Method", {"Teleport", "NonTeleport"}, false, function(v) 
+-- Select Method dropdown
+local selectMethodDD = createDropdown(f1, "Select Method", {"Teleport", "NonTeleport"}, false, function(v) 
     if states.autoGlitch and states.selectedMethod ~= v then
         handleGlitchCleanup(states.selectedMethod, function()
             states.selectedMethod = v
@@ -820,9 +817,15 @@ createDropdown(f1, "Select Method", {"Teleport", "NonTeleport"}, false, function
         states.selectedMethod = v 
     end
 end)
+dropdownSetters["selectMethod"] = selectMethodDD
+dropdownHeaderSetters["selectMethod"] = selectMethodDD
 
-local autoGlitchTrainBtn
-createToggle(f1, "Auto Glitch", function(val)
+-- Tool dropdown
+local toolDD = createDropdown(f1, "Tool Dropdown", {"Weight", "Pushups", "Situps", "Handstands"}, false, function(v) states.selectedTool = v end)
+dropdownSetters["toolDropdown"] = toolDD
+dropdownHeaderSetters["toolDropdown"] = toolDD
+
+local autoGlitchTrainBtn = createToggle(f1, "Auto Glitch", "autoGlitch", function(val)
     if val then
         if not states.selectedRock or not states.selectedMethod then return false end
         local req = rockData[states.selectedRock].req
@@ -840,7 +843,7 @@ createToggle(f1, "Auto Glitch", function(val)
         states.glitchAccumulated = states.glitchAccumulated + (os.time() - states.glitchStartTime)
         if states.autoGlitchTrain then
             states.autoGlitchTrain = false
-            if SetToggle[autoGlitchTrainBtn] then SetToggle[autoGlitchTrainBtn](false) end
+            if toggleButtons["autoGlitchTrain"] then SetToggle[toggleButtons["autoGlitchTrain"]](false) end
         end
         handleGlitchCleanup(states.selectedMethod)
         return false
@@ -850,7 +853,6 @@ end)
 local timerLabel = Instance.new("TextLabel", f1)
 timerLabel.Size = UDim2.new(1, -10, 0, 20); timerLabel.BackgroundTransparency = 1; timerLabel.TextColor3 = Color3.fromRGB(200, 200, 200); timerLabel.Text = "Glitch Timer: 00:00:00:00"
 
--- Ping & FPS Label
 local pingFpsLabel = Instance.new("TextLabel", f1)
 pingFpsLabel.Size = UDim2.new(1, -10, 0, 25)
 pingFpsLabel.BackgroundTransparency = 1
@@ -880,27 +882,31 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
-autoGlitchTrainBtn = createToggle(f1, "Auto Glitch While Training", function(val)
+createToggle(f1, "Auto Glitch While Training", "autoGlitchTrain", function(val)
     if val and not states.autoGlitch then return false end
     states.autoGlitchTrain = val
     return val
 end)
 
-local autoLiftNoAnimBtn, autoLiftBtn
-autoLiftNoAnimBtn = createToggle(f1, "Auto Lift (Without Anim)", function(val)
+local autoLiftNoAnimBtn = createToggle(f1, "Auto Lift (Without Anim)", "autoLiftNoAnim", function(val)
     states.autoLiftNoAnim = val
-    if val and autoLiftBtn then states.autoLiftValue = false; if player:FindFirstChild("autoLiftEnabled") then player.autoLiftEnabled.Value = false end; if SetToggle[autoLiftBtn] then SetToggle[autoLiftBtn](false) end end
+    if val and toggleButtons["autoLiftValue"] then
+        states.autoLiftValue = false
+        if player:FindFirstChild("autoLiftEnabled") then player.autoLiftEnabled.Value = false end
+        SetToggle[toggleButtons["autoLiftValue"]](false)
+    end
 end)
-autoLiftBtn = createToggle(f1, "Auto Lift", function(val)
+
+local autoLiftBtn = createToggle(f1, "Auto Lift", "autoLiftValue", function(val)
     states.autoLiftValue = val
     if player:FindFirstChild("autoLiftEnabled") then player.autoLiftEnabled.Value = val end
-    if val and autoLiftNoAnimBtn then states.autoLiftNoAnim = false; if SetToggle[autoLiftNoAnimBtn] then SetToggle[autoLiftNoAnimBtn](false) end end
+    if val and toggleButtons["autoLiftNoAnim"] then
+        states.autoLiftNoAnim = false
+        SetToggle[toggleButtons["autoLiftNoAnim"]](false)
+    end
 end)
 
-local toolOptions = {"Weight", "Pushups", "Situps", "Handstands"}
-local toolDD = createDropdown(f1, "Tool Dropdown", toolOptions, false, function(v) states.selectedTool = v end)
-
-createToggle(f1, "Auto Equip Tool", function(v) 
+createToggle(f1, "Auto Equip Tool", "autoEquip", function(v) 
     if v and (not states.selectedTool or states.selectedTool == "NO TOOL FOUND") then return false end
     states.autoEquip = v 
     return v
@@ -910,16 +916,17 @@ local rebBox = Instance.new("TextBox", f1)
 rebBox.Size = UDim2.new(1, -10, 0, 30); rebBox.Text = Config.RebirthTarget; rebBox.PlaceholderText = "Rebirth Target"; rebBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); rebBox.TextColor3 = Color3.new(1, 1, 1)
 rebBox.FocusLost:Connect(function() Config.RebirthTarget = rebBox.Text; SaveConfig() end)
 
--- NEW: Rebirth toggles with confirm popup when turning ON
+-- Rebirth toggles with confirm popup
 do
-    local function createRebirthConfirmToggle(parent, text, stateKey, otherStateKey, otherBtn)
+    local function createRebirthConfirmToggle(parent, text, key, stateKey, otherStateKey, otherKey)
         local btn = Instance.new("TextButton", parent)
         btn.Size = UDim2.new(1, -10, 0, 30)
         btn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
         btn.Text = text .. " [OFF]"
         btn.TextColor3 = Color3.new(1, 1, 1)
-
         local state = false
+        
+        if key then toggleButtons[key] = btn end
 
         local function updateVisual()
             btn.Text = text .. (state and " [ON]" or " [OFF]")
@@ -933,21 +940,18 @@ do
 
         btn.MouseButton1Click:Connect(function()
             if state then
-                -- Turn off immediately
                 state = false
                 updateVisual()
                 states[stateKey] = false
             else
-                -- Turn on: show confirm popup
                 createConfirmPopup("Are you sure you want to activate " .. text .. "?", function(confirmed)
                     if confirmed then
                         state = true
                         updateVisual()
                         states[stateKey] = true
-                        -- If the other is on, turn it off
                         if states[otherStateKey] then
                             states[otherStateKey] = false
-                            if otherBtn and SetToggle[otherBtn] then SetToggle[otherBtn](false) end
+                            if otherKey and toggleButtons[otherKey] then SetToggle[toggleButtons[otherKey]](false) end
                         end
                     end
                 end)
@@ -957,13 +961,11 @@ do
         return btn
     end
 
-    -- Auto Rebirth Target
-    autoRebirthTargetBtn = createRebirthConfirmToggle(f1, "Auto Rebirth Target", "autoRebirthTarget", "autoRebirthInf", autoRebirthInfBtn)
-    -- Auto Rebirth Inf
-    autoRebirthInfBtn = createRebirthConfirmToggle(f1, "Auto Rebirth Inf", "autoRebirthInf", "autoRebirthTarget", autoRebirthTargetBtn)
+    autoRebirthTargetBtn = createRebirthConfirmToggle(f1, "Auto Rebirth Target", "autoRebirthTarget", "autoRebirthTarget", "autoRebirthInf", "autoRebirthInf")
+    autoRebirthInfBtn = createRebirthConfirmToggle(f1, "Auto Rebirth Inf", "autoRebirthInf", "autoRebirthInf", "autoRebirthTarget", "autoRebirthTarget")
 end
 
-createToggle(f1, "Auto Muscle King", function(val)
+createToggle(f1, "Auto Muscle King", "autoMuscleKing", function(val)
     states.autoMuscleKing = val
     if not val then
         local char = player.Character
@@ -980,42 +982,42 @@ createToggle(f1, "Auto Muscle King", function(val)
     return val
 end)
 
-createToggle(f1, "Auto Claim Gift", function(v) states.autoClaim = v end)
-createToggle(f1, "Auto Open Chest", function(v) states.autoChest = v end)
-createToggle(f1, "Auto Punch", function(v) states.autoPunch = v end)
-createToggle(f1, "Auto Fortune Wheel", function(v) states.autoFortuneWheel = v end)
-createToggle(f1, "Accelerate Rep Speed", function(val)
+createToggle(f1, "Auto Claim Gift", "autoClaim", function(v) states.autoClaim = v end)
+createToggle(f1, "Auto Open Chest", "autoChest", function(v) states.autoChest = v end)
+createToggle(f1, "Auto Punch", "autoPunch", function(v) states.autoPunch = v end)
+createToggle(f1, "Auto Fortune Wheel", "autoFortuneWheel", function(v) states.autoFortuneWheel = v end)
+createToggle(f1, "Accelerate Rep Speed", "accelReps", function(val)
     states.accelReps = val
     local ult = player:FindFirstChild("ultimatesFolder") and player.ultimatesFolder:FindFirstChild("+5% Rep Speed")
     if ult then if val then prevRepSpeed = ult.Value; ult.Value = 1000 else ult.Value = prevRepSpeed end end
 end)
-createToggle(f1, "Fast Punch", function(val) states.fastPunch = val; local p = getPunch(); if p and p:FindFirstChild("attackTime") then p.attackTime.Value = val and 0 or 0.35 end end)
+createToggle(f1, "Fast Punch", "fastPunch", function(val) states.fastPunch = val; local p = getPunch(); if p and p:FindFirstChild("attackTime") then p.attackTime.Value = val and 0 or 0.35 end end)
 
 ----------------------------------------------------------------
 -- TAB 2: FARM
 ----------------------------------------------------------------
 local f2 = frames["Farm"]
-createToggle(f2, "Less Lag", function(val) states.lessLag = val end)
+createToggle(f2, "Less Lag", "lessLag", function(val) states.lessLag = val end)
 
 local sizeBox = Instance.new("TextBox", f2)
 sizeBox.Size = UDim2.new(1, -10, 0, 30); sizeBox.Text = Config.SizeValue; sizeBox.PlaceholderText = "Size Value"; sizeBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); sizeBox.TextColor3 = Color3.new(1, 1, 1)
 sizeBox.FocusLost:Connect(function() local num = tonumber(sizeBox.Text); if not num or num < 1 then sizeBox.Text = "1" elseif num > 100 then sizeBox.Text = "100" else sizeBox.Text = tostring(math.floor(num)) end; Config.SizeValue = sizeBox.Text; SaveConfig() end)
 
-createToggle(f2, "Auto Size Toggle", function(v) states.autoSize = v end)
+createToggle(f2, "Auto Size Toggle", "autoSize", function(v) states.autoSize = v end)
 
 local wsBox = Instance.new("TextBox", f2)
 wsBox.Size = UDim2.new(1, -10, 0, 30); wsBox.Text = Config.WalkSpeed or "16"; wsBox.PlaceholderText = "WalkSpeed"; wsBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); wsBox.TextColor3 = Color3.new(1, 1, 1)
 wsBox:GetPropertyChangedSignal("Text"):Connect(function() wsBox.Text = wsBox.Text:gsub("%D", "") end)
 wsBox.FocusLost:Connect(function() local num = tonumber(wsBox.Text); if not num or num < 1 then wsBox.Text = "16" else wsBox.Text = tostring(math.floor(num)) end; Config.WalkSpeed = wsBox.Text; SaveConfig() end)
 
-createToggle(f2, "Auto WalkSpeed", function(v) states.autoWalkSpeed = v end)
+createToggle(f2, "Auto WalkSpeed", "autoWalkSpeed", function(v) states.autoWalkSpeed = v end)
 
 local flySpeedBox = Instance.new("TextBox", f2)
 flySpeedBox.Size = UDim2.new(1, -10, 0, 30); flySpeedBox.Text = Config.FlySpeed or "50"; flySpeedBox.PlaceholderText = "Fly Speed"; flySpeedBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); flySpeedBox.TextColor3 = Color3.new(1, 1, 1)
 flySpeedBox:GetPropertyChangedSignal("Text"):Connect(function() flySpeedBox.Text = flySpeedBox.Text:gsub("%D", "") end)
 flySpeedBox.FocusLost:Connect(function() Config.FlySpeed = flySpeedBox.Text; SaveConfig() end)
 
-createToggle(f2, "Fly", function(v) 
+createToggle(f2, "Fly", "fly", function(v) 
     states.fly = v 
     if not v and states.flyBody then 
         if states.flyBody.Velocity.Parent then states.flyBody.Velocity:Destroy() end
@@ -1025,7 +1027,7 @@ createToggle(f2, "Fly", function(v)
     if not v and player.Character and player.Character:FindFirstChild("Humanoid") then player.Character.Humanoid.PlatformStand = false end
 end)
 
-createToggle(f2, "God Mode", function(v) states.godMode = v end)
+createToggle(f2, "God Mode", "godMode", function(v) states.godMode = v end)
 
 local copyPosBtn = Instance.new("TextButton", f2)
 copyPosBtn.Size = UDim2.new(1, -10, 0, 35); copyPosBtn.Text = "Copy My Position"; copyPosBtn.BackgroundColor3 = Color3.fromRGB(40, 60, 60); copyPosBtn.TextColor3 = Color3.new(1, 1, 1)
@@ -1053,7 +1055,7 @@ snackBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-lockPosBtn = createToggle(f2, "Lock Position", function(val)
+lockPosBtn = createToggle(f2, "Lock Position", "lockPosition", function(val)
     if states.autoMuscleKing and val then return false end
     if val then
         if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
@@ -1073,7 +1075,7 @@ lockPosBtn = createToggle(f2, "Lock Position", function(val)
     return val
 end)
 
-local unequipBoostsBtn = createToggle(f2, "UnEquip Boosts & Drinks", function(val)
+createToggle(f2, "UnEquip Boosts & Drinks", "autoUnequipBoosts", function(val)
     states.autoUnequipBoosts = val
     return val
 end)
@@ -1081,7 +1083,6 @@ end)
 local smallHopBtn = Instance.new("TextButton", f2); smallHopBtn.Size = UDim2.new(1, -10, 0, 35); smallHopBtn.Text = "Small Server Hop"; smallHopBtn.BackgroundColor3 = Color3.fromRGB(40, 60, 60); smallHopBtn.TextColor3 = Color3.new(1, 1, 1); smallHopBtn.MouseButton1Click:Connect(function() ServerHop("Small") end)
 local largeHopBtn = Instance.new("TextButton", f2); largeHopBtn.Size = UDim2.new(1, -10, 0, 35); largeHopBtn.Text = "Large Server Hop"; largeHopBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40); largeHopBtn.TextColor3 = Color3.new(1, 1, 1); largeHopBtn.MouseButton1Click:Connect(function() ServerHop("Large") end)
 
--- Rejoin button
 local rejoinBtn = Instance.new("TextButton", f2)
 rejoinBtn.Size = UDim2.new(1, -10, 0, 35)
 rejoinBtn.Text = "Rejoin"
@@ -1100,14 +1101,14 @@ local f3 = frames["Killer"]
 local pKillDD = createDropdown(f3, "Player Dropdown", {}, true, function(label) local realName = nameMap[label] or label; if states.killTargets[realName] then states.killTargets[realName] = nil; return false else states.killTargets[realName] = true; return true end end, function(label) local r = nameMap[label] or label; return states.killTargets[r] end)
 local whiteDD = createDropdown(f3, "Whitelist Dropdown", {}, true, function(label) local realName = nameMap[label] or label; if states.whitelist[realName] then states.whitelist[realName] = nil; return false else states.whitelist[realName] = true; return true end end, function(label) local r = nameMap[label] or label; return states.whitelist[r] end)
 
-createToggle(f3, "Whitelist Friends", function(val) states.whitelistFriends = val; for _, p in ipairs(Players:GetPlayers()) do if p ~= player and player:IsFriendsWith(p.UserId) then if val then states.whitelist[p.Name] = true else states.whitelist[p.Name] = nil end end end end)
-createToggle(f3, "Kill", function(v) states.killActive = v; if v then updateVisibility(true) else checkResetKillAttackTime() end end)
-createToggle(f3, "Kill Everyone", function(v) states.killEveryone = v; if v then updateVisibility(true) else checkResetKillAttackTime() end end)
-createToggle(f3, "Auto Good Karma", function(v) states.autoGoodKarma = v; if v then updateVisibility(true) else checkResetKillAttackTime() end end)
-createToggle(f3, "Auto Evil Karma", function(v) states.autoEvilKarma = v; if v then updateVisibility(true) else checkResetKillAttackTime() end end)
+createToggle(f3, "Whitelist Friends", nil, function(val) states.whitelistFriends = val; for _, p in ipairs(Players:GetPlayers()) do if p ~= player and player:IsFriendsWith(p.UserId) then if val then states.whitelist[p.Name] = true else states.whitelist[p.Name] = nil end end end end)
+createToggle(f3, "Kill", nil, function(v) states.killActive = v; if v then updateVisibility(true) else checkResetKillAttackTime() end end)
+createToggle(f3, "Kill Everyone", nil, function(v) states.killEveryone = v; if v then updateVisibility(true) else checkResetKillAttackTime() end end)
+createToggle(f3, "Auto Good Karma", nil, function(v) states.autoGoodKarma = v; if v then updateVisibility(true) else checkResetKillAttackTime() end end)
+createToggle(f3, "Auto Evil Karma", nil, function(v) states.autoEvilKarma = v; if v then updateVisibility(true) else checkResetKillAttackTime() end end)
 
 ----------------------------------------------------------------
--- TAB 4: REWORKED STATS & INVENTORY (REVERTED TO SIMPLE VERSION)
+-- TAB 4: STATS & INVENTORY
 ----------------------------------------------------------------
 local f4 = frames["Stats"]
 local statsPlayerDD
@@ -1235,14 +1236,13 @@ end)
 
 Players.PlayerRemoving:Connect(function(plr) if states.statsTarget == plr.Name then resetStatsUI() end end)
 
-local trackToggle
-trackToggle = createToggle(f4, "Track Stats", function(v)
+trackToggle = createToggle(f4, "Track Stats", "trackStats", function(v)
     states.trackStats = v
     if v and not states.statsTarget then return false end
     return v
 end)
 
-createToggle(f4, "Without Format Number", function(v) states.withoutFormatNum = v end)
+createToggle(f4, "Without Format Number", "withoutFormatNum", function(v) states.withoutFormatNum = v end)
 
 local tpToPlayerBtn = Instance.new("TextButton", f4)
 tpToPlayerBtn.Size = UDim2.new(1, -10, 0, 30); tpToPlayerBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 60); tpToPlayerBtn.Text = "Teleport Player"; tpToPlayerBtn.TextColor3 = Color3.new(1, 1, 1)
@@ -1254,7 +1254,7 @@ for _, s in ipairs(statNamesList) do local l = Instance.new("TextLabel", f4);
 l.Size = UDim2.new(1, -10, 0, 20); l.Text = s .. ": None"; l.BackgroundTransparency = 1; l.TextColor3 = Color3.new(1, 1, 1);
 l.TextXAlignment = Enum.TextXAlignment.Left; statsDisp[s] = l end
 
-createToggle(f4, "View Player", function(val) states.viewing = val; if not val and player.Character and player.Character:FindFirstChild("Humanoid") then workspace.CurrentCamera.CameraSubject = player.Character.Humanoid end end)
+createToggle(f4, "View Player", "viewing", function(val) states.viewing = val; if not val and player.Character and player.Character:FindFirstChild("Humanoid") then workspace.CurrentCamera.CameraSubject = player.Character.Humanoid end end)
 
 local invHeader = Instance.new("TextLabel", f4);
 invHeader.Size = UDim2.new(1, -10, 0, 25); invHeader.Text = "--- PETS ---"; invHeader.BackgroundTransparency = 1; invHeader.TextColor3 = Color3.fromRGB(200, 200, 0);
@@ -1281,8 +1281,7 @@ auraBasicDD = createDropdown(f4, "Basic Auras", {"Nothing Here"}, false, functio
 auraAdvDD = createDropdown(f4, "Advance Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; states.currentAuraTable = "Advanced"; handleAuraSelection(l, auraRefsAdv, auraDetails) end)
 auraRareDD = createDropdown(f4, "Rare Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; states.currentAuraTable = "Rare"; handleAuraSelection(l, auraRefsRare, auraDetails) end)
 auraEpicDD = createDropdown(f4, "Epic Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; states.currentAuraTable = "Epic"; handleAuraSelection(l, auraRefsEpic, auraDetails) end)
-auraUniqueDD = createDropdown(f4, "Unique Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; states.currentAuraTable = "Unique";
-handleAuraSelection(l, auraRefsUnique, auraDetails) end)
+auraUniqueDD = createDropdown(f4, "Unique Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; states.currentAuraTable = "Unique"; handleAuraSelection(l, auraRefsUnique, auraDetails) end)
 
 local ultHeader = Instance.new("TextLabel", f4); ultHeader.Size = UDim2.new(1, -10, 0, 20); ultHeader.Text = "--- ULTIMATES ---"; ultHeader.BackgroundTransparency = 1; ultHeader.TextColor3 = Color3.fromRGB(0, 200, 200); ultHeader.Font = Enum.Font.SourceSansBold; ultHeader.TextXAlignment = Enum.TextXAlignment.Left
 local ultList = Instance.new("TextLabel", f4); ultList.Size = UDim2.new(1, -10, 0, 250); ultList.BackgroundTransparency = 1; ultList.TextColor3 = Color3.new(1, 1, 1); ultList.TextXAlignment = Enum.TextXAlignment.Left; ultList.TextYAlignment = Enum.TextYAlignment.Top; ultList.Text = "None"; ultList.TextWrapped = true; ultList.AutomaticSize = Enum.AutomaticSize.Y
@@ -1291,7 +1290,7 @@ local gpHeader = Instance.new("TextLabel", f4); gpHeader.Size = UDim2.new(1, -10
 local gpList = Instance.new("TextLabel", f4); gpList.Size = UDim2.new(1, -10, 0, 200); gpList.BackgroundTransparency = 1; gpList.TextColor3 = Color3.new(1, 1, 1); gpList.TextXAlignment = Enum.TextXAlignment.Left; gpList.TextYAlignment = Enum.TextYAlignment.Top; gpList.Text = "None"; gpList.TextWrapped = true; gpList.AutomaticSize = Enum.AutomaticSize.Y
 
 ----------------------------------------------------------------
--- TAB 5: AUTO GYM (HYPER ACCURATE SEAT DETECTION)
+-- TAB 5: AUTO GYM
 ----------------------------------------------------------------
 local f5 = frames["Auto Gym"]
 
@@ -1317,14 +1316,17 @@ mapDD = createDropdown(f5, "Select Map", {"Tiny Island", "Beach", "Legend Beach"
     gymDD.refresh(gymOptions)
     gymDD.setHeaderText("Select Gym v")
 end)
+dropdownSetters["selectMap"] = mapDD
+dropdownHeaderSetters["selectMap"] = mapDD
 
 gymDD = createDropdown(f5, "Select Gym", {"Select map first"}, false, function(gymName)
     if not states.selectedMap or gymName == "Select map first" or gymName == "No gyms available" then return end
     local realName = gymName:gsub(" %(.*%)", "")
     states.selectedGym = realName
 end)
+dropdownSetters["selectGym"] = gymDD
+dropdownHeaderSetters["selectGym"] = gymDD
 
--- Gym button (same aggressive logic as auto gym, also updated MK check)
 local gymBtn = Instance.new("TextButton", f5)
 gymBtn.Size = UDim2.new(1, -10, 0, 35)
 gymBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
@@ -1344,7 +1346,6 @@ gymBtn.MouseButton1Click:Connect(function()
     local hum = chr:FindFirstChild("Humanoid")
     if hum and hum.Sit then return end
     
-    -- Teleport to gym
     chr.HumanoidRootPart.CFrame = CFrame.new(gym.pos + Vector3.new(0, 4, 0))
     chr.HumanoidRootPart.AssemblyLinearVelocity = Vector3.zero
     
@@ -1362,7 +1363,7 @@ gymBtn.MouseButton1Click:Connect(function()
     end)
 end)
 
-local autoGymBtn = createToggle(f5, "Auto Gym", function(val)
+local autoGymBtn = createToggle(f5, "Auto Gym", "autoGym", function(val)
     if val then
         if not states.selectedMap or not states.selectedGym then return false end
         startAutoGym()
@@ -1373,7 +1374,7 @@ local autoGymBtn = createToggle(f5, "Auto Gym", function(val)
 end)
 
 ----------------------------------------------------------------
--- TAB 6: AUTO CRYSTAL (SPLIT PETS & AURAS) - FIXED TOKEN FILTER + SORTED/FORMATTED DROPDOWN
+-- TAB 6: AUTO CRYSTAL
 ----------------------------------------------------------------
 local f6 = frames["Auto Crystal"]
 
@@ -1429,16 +1430,18 @@ local function scanCrystalShop()
         end
     end
     
-    -- Sort by cost ascending
-    table.sort(pets, function(a, b) return a.cost < b.cost end)
-    table.sort(auras, function(a, b) return a.cost < b.cost end)
+    -- ============================================================
+    -- CHANGED: Sort by rarity A-Z instead of cost
+    -- ============================================================
+    table.sort(pets, function(a, b) return a.rarity < b.rarity end)
+    table.sort(auras, function(a, b) return a.rarity < b.rarity end)
     
     petList = pets
     auraList = auras
 end
 scanCrystalShop()
 
-local function createCrystalSection(parent, title, list, stateKeyData, stateKeyName, autoState, startAutoFunc, stopAutoFunc)
+local function createCrystalSection(parent, title, list, stateKeyData, stateKeyName, startAutoFunc, stopAutoFunc)
     local titleLabel = Instance.new("TextLabel", parent)
     titleLabel.Size = UDim2.new(1, -10, 0, 25)
     titleLabel.BackgroundTransparency = 1
@@ -1448,7 +1451,6 @@ local function createCrystalSection(parent, title, list, stateKeyData, stateKeyN
     titleLabel.TextSize = 14
     titleLabel.TextXAlignment = Enum.TextXAlignment.Left
     
-    -- Build formatted options: "Name | Cost: X | Rarity"
     local options = {}
     local optionToData = {}
     for _, data in ipairs(list) do
@@ -1525,7 +1527,7 @@ local function createCrystalSection(parent, title, list, stateKeyData, stateKeyN
         end
     end)
     
-    local autoBuyToggle = createToggle(parent, "Auto Buy", function(on)
+    local autoBuyToggle = createToggle(parent, "Auto Buy", nil, function(on)
         if on then
             local data = states[stateKeyData]
             if not data then return false end
@@ -1539,20 +1541,19 @@ local function createCrystalSection(parent, title, list, stateKeyData, stateKeyN
     return dropdown
 end
 
-createCrystalSection(f6, "--- PETS ---", petList, "selectedPetCrystalData", "selectedPetCrystal", states.autoPetBuy, startAutoPetBuy, stopAutoPetBuy)
-createCrystalSection(f6, "--- AURAS ---", auraList, "selectedAuraCrystalData", "selectedAuraCrystal", states.autoAuraBuy, startAutoAuraBuy, stopAutoAuraBuy)
+createCrystalSection(f6, "--- PETS ---", petList, "selectedPetCrystalData", "selectedPetCrystal", startAutoPetBuy, stopAutoPetBuy)
+createCrystalSection(f6, "--- AURAS ---", auraList, "selectedAuraCrystalData", "selectedAuraCrystal", startAutoAuraBuy, stopAutoAuraBuy)
 
 ----------------------------------------------------------------
--- TAB 7: GLITCHABLE REBIRTH (NOW SHOWS GLITCH VALUE)
+-- TAB 7: GLITCHABLE REBIRTH
 ----------------------------------------------------------------
 local f7 = frames["Glitchable Rebirth"]
 
--- Rock dropdown with glitch value
 local glitchRockOptions = {}
 for name, data in pairs(rockData) do
     table.insert(glitchRockOptions, name .. " (" .. data.glitchValue .. ")")
 end
-table.sort(glitchRockOptions) -- sort alphabetically
+table.sort(glitchRockOptions)
 
 local selectedGlitchRock = nil
 local expGivesResult = nil
@@ -1721,7 +1722,7 @@ calcBtn.MouseButton1Click:Connect(function()
 end)
 
 ----------------------------------------------------------------
--- TAB 9: TELEPORT (CLEAN BUTTON LIST)
+-- TAB 9: TELEPORT
 ----------------------------------------------------------------
 local f9 = frames["Teleport"]
 
@@ -1752,14 +1753,13 @@ for _, tpData in ipairs(teleportList) do
 end
 
 ----------------------------------------------------------------
--- TAB 10: CONFIG (Save/Load Presets)
+-- TAB 10: CONFIG (FIXED LOAD)
 ----------------------------------------------------------------
 local f10 = frames["Config"]
 
 local configFilePath = "ML_Expert_Configs.json"
 local savedConfigs = {}
 
--- Load existing configs
 if isfile(configFilePath) then
     pcall(function()
         savedConfigs = HttpService:JSONDecode(readfile(configFilePath))
@@ -1769,7 +1769,6 @@ end
 
 local selectedConfigName = nil
 
--- Saved Config dropdown
 local configNames = {}
 for name, _ in pairs(savedConfigs) do
     table.insert(configNames, name)
@@ -1782,7 +1781,6 @@ local configDropdown = createDropdown(f10, "Saved Config", configNames, false, f
     end
 end)
 
--- Name textbox
 local nameTextBox = Instance.new("TextBox", f10)
 nameTextBox.Size = UDim2.new(1, -10, 0, 30)
 nameTextBox.PlaceholderText = "Config Name"
@@ -1790,38 +1788,16 @@ nameTextBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 nameTextBox.TextColor3 = Color3.new(1, 1, 1)
 nameTextBox.Text = ""
 
--- Helper to stop all automations
+-- Helper to stop all automations using toggleButtons table
 local function stopAllAutomations()
-    -- Turn off all toggles in Auto Farm, Farm, Auto Gym
-    if SetToggle[autoGlitchTrainBtn] then SetToggle[autoGlitchTrainBtn](false) end
-    if SetToggle[autoLiftNoAnimBtn] then SetToggle[autoLiftNoAnimBtn](false) end
-    if SetToggle[autoLiftBtn] then SetToggle[autoLiftBtn](false) end
-    if SetToggle[autoEquipToggle] then SetToggle[autoEquipToggle](false) end
-    if SetToggle[autoRebirthTargetBtn] then SetToggle[autoRebirthTargetBtn](false) end
-    if SetToggle[autoRebirthInfBtn] then SetToggle[autoRebirthInfBtn](false) end
-    if SetToggle[autoMuscleKingToggle] then SetToggle[autoMuscleKingToggle](false) end
-    if SetToggle[autoClaimToggle] then SetToggle[autoClaimToggle](false) end
-    if SetToggle[autoChestToggle] then SetToggle[autoChestToggle](false) end
-    if SetToggle[autoPunchToggle] then SetToggle[autoPunchToggle](false) end
-    if SetToggle[autoFortuneWheelToggle] then SetToggle[autoFortuneWheelToggle](false) end
-    if SetToggle[accelRepsToggle] then SetToggle[accelRepsToggle](false) end
-    if SetToggle[fastPunchToggle] then SetToggle[fastPunchToggle](false) end
-    -- Farm
-    if SetToggle[lessLagToggle] then SetToggle[lessLagToggle](false) end
-    if SetToggle[autoSizeToggle] then SetToggle[autoSizeToggle](false) end
-    if SetToggle[autoWalkSpeedToggle] then SetToggle[autoWalkSpeedToggle](false) end
-    if SetToggle[flyToggle] then SetToggle[flyToggle](false) end
-    if SetToggle[godModeToggle] then SetToggle[godModeToggle](false) end
-    if lockPosBtn and SetToggle[lockPosBtn] then SetToggle[lockPosBtn](false) end
-    if SetToggle[autoUnequipBoostsToggle] then SetToggle[autoUnequipBoostsToggle](false) end
-    -- Auto Gym
-    if autoGymBtn and SetToggle[autoGymBtn] then SetToggle[autoGymBtn](false) end
+    for key, btn in pairs(toggleButtons) do
+        if SetToggle[btn] then
+            SetToggle[btn](false)
+        end
+    end
     stopAutoGym()
-    -- Crystal
     stopAutoPetBuy()
     stopAutoAuraBuy()
-    if SetToggle[autoPetBuyToggle] then SetToggle[autoPetBuyToggle](false) end
-    if SetToggle[autoAuraBuyToggle] then SetToggle[autoAuraBuyToggle](false) end
 end
 
 -- Save Config button
@@ -1831,9 +1807,8 @@ saveBtn.Text = "Save Config"
 saveBtn.BackgroundColor3 = Color3.fromRGB(40, 120, 40)
 saveBtn.TextColor3 = Color3.new(1, 1, 1)
 saveBtn.MouseButton1Click:Connect(function()
-    local name = nameTextBox.Text:gsub("^%s*(.-)%s*$", "%1") -- trim
+    local name = nameTextBox.Text:gsub("^%s*(.-)%s*$", "%1")
     if name == "" then return end
-    -- Collect current states from Auto Farm, Farm, Auto Gym
     local preset = {
         config = {
             SizeValue = sizeBox.Text,
@@ -1867,12 +1842,12 @@ saveBtn.MouseButton1Click:Connect(function()
             selectedMap = states.selectedMap,
             selectedGym = states.selectedGym,
             autoGym = states.autoGym,
-            autoUnequipBoosts = states.autoUnequipBoosts
+            autoUnequipBoosts = states.autoUnequipBoosts,
+            lockPosition = states.lockedPos ~= nil
         }
     }
     savedConfigs[name] = preset
     pcall(function() writefile(configFilePath, HttpService:JSONEncode(savedConfigs)) end)
-    -- Refresh dropdown
     local newNames = {}
     for n, _ in pairs(savedConfigs) do table.insert(newNames, n) end
     if #newNames == 0 then table.insert(newNames, "No saved configs") end
@@ -1881,13 +1856,12 @@ saveBtn.MouseButton1Click:Connect(function()
 end)
 
 -- Stop Everything toggle
-local stopEverythingToggle
-stopEverythingToggle = createToggle(f10, "Stop Everything", function(val)
+createToggle(f10, "Stop Everything", "stopEverything", function(val)
     states.stopEverything = val
     return val
 end)
 
--- Load Config button
+-- Load Config button (FIXED)
 local loadBtn = Instance.new("TextButton", f10)
 loadBtn.Size = UDim2.new(1, -10, 0, 35)
 loadBtn.Text = "Load Config"
@@ -1897,95 +1871,111 @@ loadBtn.MouseButton1Click:Connect(function()
     if not selectedConfigName or not savedConfigs[selectedConfigName] then return end
     stopAllAutomations()
     local preset = savedConfigs[selectedConfigName]
-    -- Apply config
+    
+    -- Apply config textboxes
     if preset.config then
         if preset.config.SizeValue then sizeBox.Text = preset.config.SizeValue; Config.SizeValue = preset.config.SizeValue end
         if preset.config.WalkSpeed then wsBox.Text = preset.config.WalkSpeed; Config.WalkSpeed = preset.config.WalkSpeed end
         if preset.config.FlySpeed then flySpeedBox.Text = preset.config.FlySpeed; Config.FlySpeed = preset.config.FlySpeed end
         if preset.config.RebirthTarget then rebBox.Text = preset.config.RebirthTarget; Config.RebirthTarget = preset.config.RebirthTarget end
     end
+    
     local s = preset.states
     if s then
-        -- We'll set toggle states via SetToggle, but need references to all toggle buttons.
-        -- We'll store the buttons when creating them.
-    end
-    -- Since we didn't store all toggle buttons in a table, we'll just set states directly and update visuals via SetToggle if we have references.
-    -- For simplicity, just set the states table directly (most loops will pick it up). However the buttons won't reflect visually.
-    -- Better approach: we need to manually trigger SetToggle for each known button. We'll store the toggle buttons in a global table during creation.
-    -- But to avoid massive rewrite, we can directly update states and then manually call SetToggle for each button we have.
-    -- We'll do a workaround: loop through all states and apply, but need the buttons. We'll just set the states and then call SetToggle functions.
-end)
-
--- We need to store references to all toggle buttons for load functionality.
--- Let's create a helper that will store created toggle buttons in a table.
-local toggleRefs = {}
-local originalCreateToggle = createToggle
-createToggle = function(parent, text, callback, key)
-    local btn = originalCreateToggle(parent, text, function(val)
-        local res = callback(val)
-        if key then toggleRefs[key] = {btn = btn, state = val} end
-        return res
-    end)
-    if key then toggleRefs[key] = {btn = btn, state = false} end
-    return btn
-end
-
--- Now we need to redo the toggle creations with keys for relevant ones.
--- Since the script already created many toggles without keys, we'll need to replace the lines.
--- However, the script is huge and I can't redo all. I'll modify the load function to just set states and manually update a few known toggles.
--- For simplicity, we can iterate over all children of the frames and find TextButtons with our toggle pattern.
--- But that's fragile. I'll skip the visual update for now and just set states. User can manually refresh UI by toggling.
--- The main feature works.
-
--- I'll add the load button functionality to set states only.
-
--- Overwrite load function to set states without visual update (acceptable).
-local loadBtnReal = loadBtn
-loadBtn.MouseButton1Click:Connect(function()
-    if not selectedConfigName or not savedConfigs[selectedConfigName] then return end
-    stopAllAutomations()
-    local preset = savedConfigs[selectedConfigName]
-    if preset.config then
-        if preset.config.SizeValue then sizeBox.Text = preset.config.SizeValue; Config.SizeValue = preset.config.SizeValue end
-        if preset.config.WalkSpeed then wsBox.Text = preset.config.WalkSpeed; Config.WalkSpeed = preset.config.WalkSpeed end
-        if preset.config.FlySpeed then flySpeedBox.Text = preset.config.FlySpeed; Config.FlySpeed = preset.config.FlySpeed end
-        if preset.config.RebirthTarget then rebBox.Text = preset.config.RebirthTarget; Config.RebirthTarget = preset.config.RebirthTarget end
-    end
-    local s = preset.states
-    if s then
-        states.selectedRock = s.selectedRock
-        states.selectedMethod = s.selectedMethod
-        states.autoGlitch = s.autoGlitch
-        states.autoGlitchTrain = s.autoGlitchTrain
-        states.autoLiftNoAnim = s.autoLiftNoAnim
-        states.autoLiftValue = s.autoLiftValue
-        states.autoRebirthTarget = s.autoRebirthTarget
-        states.autoRebirthInf = s.autoRebirthInf
-        states.selectedTool = s.selectedTool
-        states.autoEquip = s.autoEquip
-        states.autoClaim = s.autoClaim
-        states.autoChest = s.autoChest
-        states.autoFortuneWheel = s.autoFortuneWheel
-        states.fastPunch = s.fastPunch
-        states.autoPunch = s.autoPunch
-        states.accelReps = s.accelReps
-        states.autoSize = s.autoSize
-        states.autoWalkSpeed = s.autoWalkSpeed
-        states.fly = s.fly
-        states.godMode = s.godMode
-        states.lessLag = s.lessLag
-        states.autoMuscleKing = s.autoMuscleKing
-        states.selectedMap = s.selectedMap
-        states.selectedGym = s.selectedGym
-        states.autoUnequipBoosts = s.autoUnequipBoosts
-        if s.autoGym then startAutoGym() else stopAutoGym() end
+        -- Update states table
+        for k, v in pairs(s) do
+            if states[k] ~= nil then
+                states[k] = v
+            end
+        end
+        
+        -- Update toggle buttons visually
+        local toggleStateMap = {
+            autoGlitch = "autoGlitch",
+            autoGlitchTrain = "autoGlitchTrain",
+            autoLiftNoAnim = "autoLiftNoAnim",
+            autoLiftValue = "autoLiftValue",
+            autoEquip = "autoEquip",
+            autoRebirthTarget = "autoRebirthTarget",
+            autoRebirthInf = "autoRebirthInf",
+            autoMuscleKing = "autoMuscleKing",
+            autoClaim = "autoClaim",
+            autoChest = "autoChest",
+            autoPunch = "autoPunch",
+            autoFortuneWheel = "autoFortuneWheel",
+            accelReps = "accelReps",
+            fastPunch = "fastPunch",
+            lessLag = "lessLag",
+            autoSize = "autoSize",
+            autoWalkSpeed = "autoWalkSpeed",
+            fly = "fly",
+            godMode = "godMode",
+            autoUnequipBoosts = "autoUnequipBoosts",
+            autoGym = "autoGym",
+            stopEverything = "stopEverything",
+            trackStats = "trackStats",
+            withoutFormatNum = "withoutFormatNum",
+            viewing = "viewing",
+            lockPosition = "lockPosition"
+        }
+        
+        for stateKey, toggleKey in pairs(toggleStateMap) do
+            local btn = toggleButtons[toggleKey]
+            if btn and SetToggle[btn] then
+                local val = s[stateKey]
+                if val ~= nil then
+                    SetToggle[btn](val)
+                end
+            end
+        end
+        
+        -- Update dropdowns
+        if s.selectedRock and dropdownSetters["selectRock"] then
+            dropdownSetters["selectRock"].setValue(s.selectedRock)
+        end
+        if s.selectedMethod and dropdownSetters["selectMethod"] then
+            dropdownSetters["selectMethod"].setValue(s.selectedMethod)
+        end
+        if s.selectedTool and dropdownSetters["toolDropdown"] then
+            dropdownSetters["toolDropdown"].setValue(s.selectedTool)
+        end
+        if s.selectedMap and dropdownSetters["selectMap"] then
+            dropdownSetters["selectMap"].setValue(s.selectedMap)
+            -- When selecting a map, also update the gym options
+        end
+        if s.selectedGym and dropdownSetters["selectGym"] and s.selectedMap then
+            -- We need to set the gym, but the gym names are formatted with cost. Reconstruct the display name
+            local mapData = gymData[s.selectedMap]
+            if mapData then
+                local gymDisplayName = s.selectedGym
+                -- Try to find the full display name with cost
+                for name, info in pairs(mapData) do
+                    local costStr = info.cost and (" (" .. formatNum(info.cost) .. " Str)") or ""
+                    local fullName = name .. costStr
+                    if name == s.selectedGym or fullName == s.selectedGym then
+                        gymDisplayName = fullName
+                        break
+                    end
+                end
+                dropdownSetters["selectGym"].setValue(gymDisplayName)
+            end
+        end
+        
+        -- Handle Lock Position
+        if s.lockPosition and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            states.lockedPos = player.Character.HumanoidRootPart.CFrame
+        end
+        
+        -- Handle Auto Gym start
+        if s.autoGym then
+            startAutoGym()
+        end
     end
 end)
 
 ----------------------------------------------------------------
--- MAIN LOOPS (with Stop Everything check)
+-- MAIN LOOPS
 ----------------------------------------------------------------
--- Auto Muscle King
 table.insert(getgenv().ML_Expert_Loops, RunService.Heartbeat:Connect(function()
     if states.stopEverything then return end
     if states.autoMuscleKing then
@@ -2002,9 +1992,9 @@ table.insert(getgenv().ML_Expert_Loops, RunService.Heartbeat:Connect(function()
     end
 end))
 
--- Anti-void loop (new)
+-- Anti-void loop
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
-    local beachPos = Vector3.new(4.466469, 7.303733, 132.878891) -- Beach Island from teleport tab
+    local beachPos = Vector3.new(4.466469, 7.303733, 132.878891)
     while true do
         task.wait(0.5)
         if states.stopEverything then continue end
@@ -2021,7 +2011,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Walk on water (invisible platform following player)
+-- Walk on water
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     local waterPart = workspace:FindFirstChild("underSea")
     if not waterPart or not waterPart:IsA("BasePart") then return end
@@ -2049,7 +2039,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- UnEquip Boosts & Drinks loop
+-- UnEquip Boosts
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     local allowedWorkoutTools = {
         ["Punch"] = true, ["Weight"] = true, ["Stomp"] = true,
@@ -2072,7 +2062,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- God mode, size, fly, walkspeed (respects Less Lag)
+-- God mode, size, fly, walkspeed
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
@@ -2118,7 +2108,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Weight Glue Logic
+-- Weight Glue
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         task.wait()
@@ -2210,9 +2200,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- ================================
--- DEDICATED AUTO GLITCH LOOP
--- ================================
+-- Auto Glitch Loop
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         task.wait()
@@ -2390,7 +2378,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         if states.autoRebirthInf then ReplicatedStorage.rEvents.rebirthRemote:InvokeServer("rebirthRequest") end
         if states.autoRebirthTarget then local target = tonumber(Config.RebirthTarget) or 0;
             if player.leaderstats.Rebirths.Value < target then ReplicatedStorage.rEvents.rebirthRemote:InvokeServer("rebirthRequest") else states.autoRebirthTarget = false;
-            if SetToggle[autoRebirthTargetBtn] then SetToggle[autoRebirthTargetBtn](false) end end end
+            if toggleButtons["autoRebirthTarget"] then SetToggle[toggleButtons["autoRebirthTarget"]](false) end end end
         if states.viewing and states.statsTarget then local tp = Players:FindFirstChild(states.statsTarget);
             if tp and tp.Character and tp.Character:FindFirstChild("Humanoid") then workspace.CurrentCamera.CameraSubject = tp.Character.Humanoid end elseif not states.viewing and player.Character and player.Character:FindFirstChild("Humanoid") then workspace.CurrentCamera.CameraSubject = player.Character.Humanoid end
         
