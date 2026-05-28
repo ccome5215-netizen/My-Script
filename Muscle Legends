@@ -1662,46 +1662,35 @@ calcBtn.MouseButton1Click:Connect(function()
 end)
 
 ----------------------------------------------------------------
--- TAB 9: TELEPORT (CLEAN DROPDOWN + BUTTON)
+-- TAB 9: TELEPORT (CLEAN BUTTON LIST)
 ----------------------------------------------------------------
 local f9 = frames["Teleport"]
 
-local teleportPositions = {
-    ["Safe Spot"] = Vector3.new(218.565002, 41.153748, -8129.369629),
-    ["Tiny Island"] = Vector3.new(-33.693745, 7.456870, 1892.807007),
-    ["Beach"] = Vector3.new(4.466469, 7.303733, 132.878891),
-    ["Frozen Island"] = Vector3.new(-2623.022217, 7.303728, -409.073334),
-    ["Mystic Island"] = Vector3.new(2250.778076, 7.303732, 1073.226685),
-    ["Inferno Island"] = Vector3.new(-6758.963867, 7.303741, -1284.918701),
-    ["Legends Island"] = Vector3.new(4603.281738, 991.481750, -3897.865723),
-    ["Muscle King Island"] = Vector3.new(-8625.929688, 17.153761, -5730.473145),
-    ["Jungle Island"] = Vector3.new(-8685.621094, 6.732735, 2392.326660)
+local teleportList = {
+    {name = "Safe Spot", pos = Vector3.new(218.565002, 41.153748, -8129.369629)},
+    {name = "Tiny Island", pos = Vector3.new(-33.693745, 7.456870, 1892.807007)},
+    {name = "Beach Island", pos = Vector3.new(4.466469, 7.303733, 132.878891)},
+    {name = "Frozen Island", pos = Vector3.new(-2623.022217, 7.303728, -409.073334)},
+    {name = "Mystic Island", pos = Vector3.new(2250.778076, 7.303732, 1073.226685)},
+    {name = "Inferno Island", pos = Vector3.new(-6758.963867, 7.303741, -1284.918701)},
+    {name = "Legends Island", pos = Vector3.new(4603.281738, 991.481750, -3897.865723)},
+    {name = "Muscle King Island", pos = Vector3.new(-8625.929688, 17.153761, -5730.473145)},
+    {name = "Jungle Island", pos = Vector3.new(-8685.621094, 6.732735, 2392.326660)}
 }
 
-local teleportNames = {}
-for name, _ in pairs(teleportPositions) do
-    table.insert(teleportNames, name)
+for _, tpData in ipairs(teleportList) do
+    local btn = Instance.new("TextButton", f9)
+    btn.Size = UDim2.new(1, -10, 0, 35)
+    btn.Text = tpData.name
+    btn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
+    btn.TextColor3 = Color3.new(1, 1, 1)
+    btn.MouseButton1Click:Connect(function()
+        local char = player.Character
+        if char and char:FindFirstChild("HumanoidRootPart") then
+            char.HumanoidRootPart.CFrame = CFrame.new(tpData.pos)
+        end
+    end)
 end
-
-local selectedTeleport = nil
-local teleportDropdown = createDropdown(f9, "Select Location", teleportNames, false, function(name)
-    selectedTeleport = name
-end)
-
-local teleportBtn = Instance.new("TextButton", f9)
-teleportBtn.Size = UDim2.new(1, -10, 0, 35)
-teleportBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
-teleportBtn.Text = "Teleport"
-teleportBtn.TextColor3 = Color3.new(1, 1, 1)
-teleportBtn.MouseButton1Click:Connect(function()
-    if not selectedTeleport then return end
-    local pos = teleportPositions[selectedTeleport]
-    if not pos then return end
-    local char = player.Character
-    if char and char:FindFirstChild("HumanoidRootPart") then
-        char.HumanoidRootPart.CFrame = CFrame.new(pos)
-    end
-end)
 
 ----------------------------------------------------------------
 -- MAIN LOOPS
