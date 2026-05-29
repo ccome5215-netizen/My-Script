@@ -1766,7 +1766,7 @@ for _, tpData in ipairs(teleportList) do
 end
 
 ----------------------------------------------------------------
--- TAB 10: CONFIG (FIXED LOAD)
+-- TAB 10: CONFIG (FIXED LOAD WITH TIMER PERSISTENCE)
 ----------------------------------------------------------------
 local f10 = frames["Config"]
 
@@ -1813,7 +1813,7 @@ local function stopAllAutomations()
     stopAutoAuraBuy()
 end
 
--- Save Config button
+-- Save Config button (now saves glitch timer total)
 local saveBtn = Instance.new("TextButton", f10)
 saveBtn.Size = UDim2.new(1, -10, 0, 35)
 saveBtn.Text = "Save Config"
@@ -1822,6 +1822,13 @@ saveBtn.TextColor3 = Color3.new(1, 1, 1)
 saveBtn.MouseButton1Click:Connect(function()
     local name = nameTextBox.Text:gsub("^%s*(.-)%s*$", "%1")
     if name == "" then return end
+    
+    -- Calculate current total glitch seconds (including if currently glitching)
+    local totalGlitchSeconds = states.glitchAccumulated
+    if states.autoGlitch then
+        totalGlitchSeconds = totalGlitchSeconds + (os.time() - states.glitchStartTime)
+    end
+    
     local preset = {
         config = {
             SizeValue = sizeBox.Text,
@@ -1833,6 +1840,7 @@ saveBtn.MouseButton1Click:Connect(function()
             selectedRock = states.selectedRock,
             selectedMethod = states.selectedMethod,
             autoGlitch = states.autoGlitch,
+            glitchTotal = totalGlitchSeconds,  -- Save total glitch time
             autoGlitchTrain = states.autoGlitchTrain,
             autoLiftNoAnim = states.autoLiftNoAnim,
             autoLiftValue = states.autoLiftValue,
@@ -1874,7 +1882,7 @@ createToggle(f10, "Stop Everything", "stopEverything", function(val)
     return val
 end)
 
--- Load Config button (FIXED)
+-- Load Config button (restores glitch timer and auto-starts if needed)
 local loadBtn = Instance.new("TextButton", f10)
 loadBtn.Size = UDim2.new(1, -10, 0, 35)
 loadBtn.Text = "Load Config"
@@ -1895,11 +1903,23 @@ loadBtn.MouseButton1Click:Connect(function()
     
     local s = preset.states
     if s then
-        -- Update states table
+        -- Update states table (except glitch-specific ones we handle manually)
         for k, v in pairs(s) do
-            if states[k] ~= nil then
+            if k ~= "glitchTotal" and states[k] ~= nil then
                 states[k] = v
             end
+        end
+        
+        -- Restore glitch timer correctly
+        local savedGlitchTotal = s.glitchTotal or 0
+        states.glitchAccumulated = savedGlitchTotal
+        if s.autoGlitch then
+            states.autoGlitch = true
+            states.glitchStartTime = os.time()  -- Start fresh from now
+            -- No need to add to accumulated because savedGlitchTotal already includes all previous time
+        else
+            states.autoGlitch = false
+            states.glitchStartTime = 0
         end
         
         -- Update toggle buttons visually
@@ -1954,14 +1974,11 @@ loadBtn.MouseButton1Click:Connect(function()
         end
         if s.selectedMap and dropdownSetters["selectMap"] then
             dropdownSetters["selectMap"].setValue(s.selectedMap)
-            -- When selecting a map, also update the gym options
         end
         if s.selectedGym and dropdownSetters["selectGym"] and s.selectedMap then
-            -- We need to set the gym, but the gym names are formatted with cost. Reconstruct the display name
             local mapData = gymData[s.selectedMap]
             if mapData then
                 local gymDisplayName = s.selectedGym
-                -- Try to find the full display name with cost
                 for name, info in pairs(mapData) do
                     local costStr = info.cost and (" (" .. formatNum(info.cost) .. " Str)") or ""
                     local fullName = name .. costStr
@@ -2003,13 +2020,11 @@ removeConfigBtn.MouseButton1Click:Connect(function()
             savedConfigs[selectedConfigName] = nil
             pcall(function() writefile(configFilePath, HttpService:JSONEncode(savedConfigs)) end)
             
-            -- Update dropdown options
             local newNames = {}
             for n, _ in pairs(savedConfigs) do table.insert(newNames, n) end
             if #newNames == 0 then table.insert(newNames, "No saved configs") end
             configDropdown.refresh(newNames)
             
-            -- Reset selection
             selectedConfigName = nil
             configDropdown.setHeaderText("Saved Config v")
         end
@@ -2017,7 +2032,7 @@ removeConfigBtn.MouseButton1Click:Connect(function()
 end)
 
 ----------------------------------------------------------------
--- MAIN LOOPS
+-- MAIN LOOPS (unchanged, full functionality preserved)
 ----------------------------------------------------------------
 table.insert(getgenv().ML_Expert_Loops, RunService.Heartbeat:Connect(function()
     if states.stopEverything then return end
