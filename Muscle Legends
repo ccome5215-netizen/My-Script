@@ -1430,9 +1430,24 @@ local function scanCrystalShop()
         end
     end
     
-    -- Sort by rarity A-Z instead of cost
-    table.sort(pets, function(a, b) return a.rarity < b.rarity end)
-    table.sort(auras, function(a, b) return a.rarity < b.rarity end)
+    -- Sort by custom rarity order: Basic → Advanced → Rare → Epic → Unique
+    local rarityOrder = {["Basic"] = 1, ["Advanced"] = 2, ["Rare"] = 3, ["Epic"] = 4, ["Unique"] = 5}
+    table.sort(pets, function(a, b)
+        local orderA = rarityOrder[a.rarity] or 99
+        local orderB = rarityOrder[b.rarity] or 99
+        if orderA == orderB then
+            return a.name < b.name
+        end
+        return orderA < orderB
+    end)
+    table.sort(auras, function(a, b)
+        local orderA = rarityOrder[a.rarity] or 99
+        local orderB = rarityOrder[b.rarity] or 99
+        if orderA == orderB then
+            return a.name < b.name
+        end
+        return orderA < orderB
+    end)
     
     petList = pets
     auraList = auras
