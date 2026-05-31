@@ -1,5 +1,5 @@
 -- ================================================================
--- MUSCLE LEGENDS EXPERT SCRIPT v5 (FULL FEATURE)
+-- MUSCLE LEGENDS EXPERT SCRIPT v5 (FULL FEATURE - FINAL)
 -- ================================================================
 if getgenv().ML_Expert_UI then pcall(function() getgenv().ML_Expert_UI:Destroy() end) end
 if getgenv().ML_Expert_Loops then
@@ -64,7 +64,7 @@ local states = {
     autoWalkSpeed = false, fly = false, flyBody = nil, autoMuscleKing = false,
     killTargets = {}, whitelist = {}, whitelistFriends = false, killActive = false, killEveryone = false,
     autoGoodKarma = false, autoEvilKarma = false, statsTarget = nil, trackStats = false,
-    viewing = false, withoutFormatNum = false, autoChest = false, autoFortuneWheel = false,
+    viewing = false, withoutFormatNum = false, autoFortuneWheel = false,
     currentPetLabel = nil, currentPetTable = nil, currentAuraLabel = nil, currentAuraTable = nil,
     lessLag = false,
     selectedMap = nil, selectedGym = nil, autoGym = false, autoGymThread = nil,
@@ -980,7 +980,6 @@ createToggle(f1, "Auto Muscle King", "autoMuscleKing", function(val)
 end)
 
 createToggle(f1, "Auto Claim Gift", "autoClaim", function(v) states.autoClaim = v end)
-createToggle(f1, "Auto Open Chest", "autoChest", function(v) states.autoChest = v end)
 createToggle(f1, "Auto Punch", "autoPunch", function(v) states.autoPunch = v end)
 createToggle(f1, "Auto Fortune Wheel", "autoFortuneWheel", function(v) states.autoFortuneWheel = v end)
 createToggle(f1, "Accelerate Rep Speed", "accelReps", function(val)
@@ -991,7 +990,7 @@ end)
 createToggle(f1, "Fast Punch", "fastPunch", function(val) states.fastPunch = val; local p = getPunch(); if p and p:FindFirstChild("attackTime") then p.attackTime.Value = val and 0 or 0.35 end end)
 
 ----------------------------------------------------------------
--- TAB 2: FARM
+-- TAB 2: FARM (UPDATED: Removed Auto Chest toggle, added Open All Chest button)
 ----------------------------------------------------------------
 local f2 = frames["Farm"]
 createToggle(f2, "Less Lag", "lessLag", function(val) states.lessLag = val end)
@@ -1089,6 +1088,23 @@ rejoinBtn.MouseButton1Click:Connect(function()
     pcall(function()
         TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, player)
     end)
+end)
+
+-- NEW: Open All Chest button (replaces the old Auto Chest toggle)
+local openAllChestsBtn = Instance.new("TextButton", f2)
+openAllChestsBtn.Size = UDim2.new(1, -10, 0, 35)
+openAllChestsBtn.Text = "Open All Chest"
+openAllChestsBtn.BackgroundColor3 = Color3.fromRGB(60, 120, 60)
+openAllChestsBtn.TextColor3 = Color3.new(1, 1, 1)
+openAllChestsBtn.MouseButton1Click:Connect(function()
+    local rs = game:GetService("ReplicatedStorage")
+    local chests = {"Group Rewards", "Golden Chest", "Enchanted Chest", "Mythical Chest", "Magma Chest", "Legends Chest", "Jungle Chest"}
+    for _, chestName in ipairs(chests) do
+        pcall(function()
+            rs.rEvents.checkChestRemote:InvokeServer(chestName)
+        end)
+        task.wait(0.3) -- small delay to avoid rate limiting
+    end
 end)
 
 ----------------------------------------------------------------
@@ -1371,7 +1387,7 @@ local autoGymBtn = createToggle(f5, "Auto Gym", "autoGym", function(val)
 end)
 
 ----------------------------------------------------------------
--- TAB 6: AUTO CRYSTAL (UPDATED)
+-- TAB 6: AUTO CRYSTAL
 ----------------------------------------------------------------
 local f6 = frames["Auto Crystal"]
 
@@ -1427,29 +1443,29 @@ local function scanCrystalShop()
         end
     end
     
-    -- Sort by COST first (lower cost better), then by rarity order (Basic → Advanced → Rare → Epic → Unique)
+    -- Sort by rarity order first, then by cost (low to high)
     local rarityOrder = {["Basic"] = 1, ["Advanced"] = 2, ["Rare"] = 3, ["Epic"] = 4, ["Unique"] = 5}
     table.sort(pets, function(a, b)
-        if a.cost == b.cost then
-            local orderA = rarityOrder[a.rarity] or 99
-            local orderB = rarityOrder[b.rarity] or 99
-            if orderA == orderB then
+        local orderA = rarityOrder[a.rarity] or 99
+        local orderB = rarityOrder[b.rarity] or 99
+        if orderA == orderB then
+            if a.cost == b.cost then
                 return a.name < b.name
             end
-            return orderA < orderB
+            return a.cost < b.cost
         end
-        return a.cost < b.cost
+        return orderA < orderB
     end)
     table.sort(auras, function(a, b)
-        if a.cost == b.cost then
-            local orderA = rarityOrder[a.rarity] or 99
-            local orderB = rarityOrder[b.rarity] or 99
-            if orderA == orderB then
+        local orderA = rarityOrder[a.rarity] or 99
+        local orderB = rarityOrder[b.rarity] or 99
+        if orderA == orderB then
+            if a.cost == b.cost then
                 return a.name < b.name
             end
-            return orderA < orderB
+            return a.cost < b.cost
         end
-        return a.cost < b.cost
+        return orderA < orderB
     end)
     
     petList = pets
@@ -1468,17 +1484,6 @@ local function getItemFolder(data)
         local rarityFolder = data.rarity
         return player:FindFirstChild("petsFolder") and player.petsFolder:FindFirstChild(rarityFolder)
     end
-end
-
--- Helper to find an item instance by name inside a given folder
-local function findItemInFolder(folder, itemName)
-    if not folder then return nil end
-    for _, child in ipairs(folder:GetChildren()) do
-        if child.Name == itemName then
-            return child
-        end
-    end
-    return nil
 end
 
 -- Helper to evolve an item (pet or aura)
@@ -1563,7 +1568,7 @@ local function createCrystalSection(parent, title, list, stateKeyData, stateKeyN
         fireBuyCrystal(data)
     end)
     
-    -- NEW: Buy 5 instantly (no wait between purchases)
+    -- Buy 5 instantly (no delay)
     local buy5Btn = Instance.new("TextButton", parent)
     buy5Btn.Size = UDim2.new(1, -10, 0, 35)
     buy5Btn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
@@ -1577,7 +1582,7 @@ local function createCrystalSection(parent, title, list, stateKeyData, stateKeyN
         end
     end)
     
-    -- NEW: Buy 5 & Evolve (buys 5 copies, then evolves the newly obtained item)
+    -- Buy 5 & Evolve
     local buy5EvolveBtn = Instance.new("TextButton", parent)
     buy5EvolveBtn.Size = UDim2.new(1, -10, 0, 35)
     buy5EvolveBtn.BackgroundColor3 = Color3.fromRGB(100, 60, 40)
@@ -1587,7 +1592,6 @@ local function createCrystalSection(parent, title, list, stateKeyData, stateKeyN
         local data = states[stateKeyData]
         if not data then return end
         
-        -- Take a snapshot of current items in the target folder before buying
         local targetFolder = getItemFolder(data)
         if not targetFolder then
             infoLabel.Text = "Error: Cannot locate folder for " .. data.name
@@ -1599,15 +1603,12 @@ local function createCrystalSection(parent, title, list, stateKeyData, stateKeyN
             beforeItems[child.Name] = child
         end
         
-        -- Buy 5 copies instantly
         for _ = 1, 5 do
             fireBuyCrystal(data)
         end
         
-        -- Small delay to allow server to process purchases
         task.wait(0.5)
         
-        -- Find which item was newly added (same name as selected crystal)
         local newItem = nil
         for _, child in ipairs(targetFolder:GetChildren()) do
             if child.Name == data.name and not beforeItems[child.Name] then
@@ -1616,7 +1617,6 @@ local function createCrystalSection(parent, title, list, stateKeyData, stateKeyN
             end
         end
         
-        -- If not found by name, try to find any item that wasn't there before (in case name changed)
         if not newItem then
             for _, child in ipairs(targetFolder:GetChildren()) do
                 if not beforeItems[child.Name] then
@@ -1658,7 +1658,7 @@ local f7 = frames["Glitchable Rebirth"]
 
 local glitchRockOptions = {}
 for name, data in pairs(rockData) do
-    table.insert(glitchRockOptions, name .. " (" .. data.glitchValue .. ")")
+    table.insert(glitchRockOptions, name .. " (Glitch Value: " .. data.glitchValue .. ")")
 end
 table.sort(glitchRockOptions)
 
@@ -1785,7 +1785,7 @@ petExpCalcLabel.TextSize = 12
 _G.GlitchPetExpCalcLabel = petExpCalcLabel
 
 ----------------------------------------------------------------
--- TAB 8: CALCULATOR (UPDATED: only clears after pressing Calculate)
+-- TAB 8: CALCULATOR
 ----------------------------------------------------------------
 local f8 = frames["Calculator"]
 
@@ -1796,7 +1796,7 @@ calcInput.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 calcInput.TextColor3 = Color3.new(1, 1, 1)
 calcInput.Font = Enum.Font.Gotham
 calcInput.TextSize = 14
--- Do NOT clear on focus – keep the text
+calcInput.ClearTextOnFocus = false   -- Keeps text when focusing
 
 local calcResultLabel = Instance.new("TextLabel", f8)
 calcResultLabel.Size = UDim2.new(1, -10, 0, 30)
@@ -1824,8 +1824,7 @@ calcBtn.MouseButton1Click:Connect(function()
     end)
     if success then
         calcResultLabel.Text = "Result: " .. tostring(result)
-        -- Clear input after successful calculation
-        calcInput.Text = ""
+        calcInput.Text = ""   -- Clear only after successful calculation
     else
         calcResultLabel.Text = "Result: Invalid expression"
     end
@@ -1863,7 +1862,7 @@ for _, tpData in ipairs(teleportList) do
 end
 
 ----------------------------------------------------------------
--- TAB 10: CONFIG (UPDATED: Chest list changed, timer persistence unchanged)
+-- TAB 10: CONFIG (Updated to remove autoChest from saved states)
 ----------------------------------------------------------------
 local f10 = frames["Config"]
 
@@ -1898,7 +1897,6 @@ nameTextBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 nameTextBox.TextColor3 = Color3.new(1, 1, 1)
 nameTextBox.Text = ""
 
--- Helper to stop all automations using toggleButtons table
 local function stopAllAutomations()
     for key, btn in pairs(toggleButtons) do
         if SetToggle[btn] then
@@ -1945,7 +1943,6 @@ saveBtn.MouseButton1Click:Connect(function()
             selectedTool = states.selectedTool,
             autoEquip = states.autoEquip,
             autoClaim = states.autoClaim,
-            autoChest = states.autoChest,
             autoFortuneWheel = states.autoFortuneWheel,
             fastPunch = states.fastPunch,
             autoPunch = states.autoPunch,
@@ -1978,7 +1975,7 @@ createToggle(f10, "Stop Everything", "stopEverything", function(val)
     return val
 end)
 
--- Load Config button (restores glitch timer)
+-- Load Config button
 local loadBtn = Instance.new("TextButton", f10)
 loadBtn.Size = UDim2.new(1, -10, 0, 35)
 loadBtn.Text = "Load Config"
@@ -2024,7 +2021,6 @@ loadBtn.MouseButton1Click:Connect(function()
             autoRebirthInf = "autoRebirthInf",
             autoMuscleKing = "autoMuscleKing",
             autoClaim = "autoClaim",
-            autoChest = "autoChest",
             autoPunch = "autoPunch",
             autoFortuneWheel = "autoFortuneWheel",
             accelReps = "accelReps",
@@ -2091,7 +2087,7 @@ loadBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- Remove Config button (unchanged)
+-- Remove Config button
 local removeConfigBtn = Instance.new("TextButton", f10)
 removeConfigBtn.Size = UDim2.new(1, -10, 0, 35)
 removeConfigBtn.Text = "Remove Config"
@@ -2116,36 +2112,8 @@ removeConfigBtn.MouseButton1Click:Connect(function()
 end)
 
 ----------------------------------------------------------------
--- UPDATE AUTO CHEST LOOP (new chest list)
+-- MAIN LOOPS (Auto Chest loop removed, other loops preserved)
 ----------------------------------------------------------------
--- We need to replace the chest list inside the Auto Chest loop.
--- The original loop is somewhere in the main loops section. We will replace it.
--- Since the script is long, we locate the existing Auto Chest loop and override it.
--- The loop currently is:
--- table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
---     while task.wait(1) do
---         if states.stopEverything then continue end
---         if states.autoChest then
---             local chests = {"magmaChest", "legendsChest", "crystalChest", "mythicalChest", "jungleChest", "spaceChest", "groupRewards"}
---             for _, chestName in ipairs(chests) do
---                 pcall(function()
---                     game:GetService("ReplicatedStorage").rEvents.checkChestRemote:InvokeServer(chestName)
---                 end)
---             end
---         end
---     end
--- end))
--- We'll replace that loop entirely.
-
--- We'll remove the existing Auto Chest loop later by reassigning. For now, we add a new loop after all loops have been defined.
--- But to avoid duplication, we will modify the existing loop in the final part of the script.
--- Because the script is huge, I will include the corrected loop at the end, and the previous definition (which is still present in the original) will be overwritten by the new one if we add it after.
--- However, the original loop is already inserted. To be safe, we will locate and replace it in the final code block.
--- In the script below, I have already replaced the Auto Chest loop with the new chest list.
-
--- ================================================================
--- MAIN LOOPS (with updated Auto Chest list)
--- ================================================================
 table.insert(getgenv().ML_Expert_Loops, RunService.Heartbeat:Connect(function()
     if states.stopEverything then return end
     if states.autoMuscleKing then
@@ -2482,21 +2450,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                         end
                     end
                 end
-            end
-        end
-    end
-end))
-
--- AUTO CHEST LOOP (UPDATED: New chest list)
-table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
-    while task.wait(1) do
-        if states.stopEverything then continue end
-        if states.autoChest then
-            local chests = {"groupRewards", "Golden Chest", "Enchanted Chest", "Mysthical Chest", "Magma Chest", "Legends Chest", "Jungle Chest"}
-            for _, chestName in ipairs(chests) do
-                pcall(function()
-                    game:GetService("ReplicatedStorage").rEvents.checkChestRemote:InvokeServer(chestName)
-                end)
             end
         end
     end
