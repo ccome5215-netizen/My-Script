@@ -990,7 +990,7 @@ end)
 createToggle(f1, "Fast Punch", "fastPunch", function(val) states.fastPunch = val; local p = getPunch(); if p and p:FindFirstChild("attackTime") then p.attackTime.Value = val and 0 or 0.35 end end)
 
 ----------------------------------------------------------------
--- TAB 2: FARM (UPDATED: Removed Auto Chest toggle, added Open All Chest button)
+-- TAB 2: FARM (UPDATED: Added confirmation for Eat All Snacks)
 ----------------------------------------------------------------
 local f2 = frames["Farm"]
 createToggle(f2, "Less Lag", "lessLag", function(val) states.lessLag = val end)
@@ -1029,26 +1029,34 @@ local copyPosBtn = Instance.new("TextButton", f2)
 copyPosBtn.Size = UDim2.new(1, -10, 0, 35); copyPosBtn.Text = "Copy My Position"; copyPosBtn.BackgroundColor3 = Color3.fromRGB(40, 60, 60); copyPosBtn.TextColor3 = Color3.new(1, 1, 1)
 copyPosBtn.MouseButton1Click:Connect(function() if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then local pos = player.Character.HumanoidRootPart.Position; pcall(function() setclipboard(string.format("%f, %f, %f", pos.X, pos.Y, pos.Z)) end) end end)
 
+-- Eat All Snacks button with confirmation
 local snackBtn = Instance.new("TextButton", f2)
-snackBtn.Size = UDim2.new(1, -10, 0, 35); snackBtn.Text = "Eat All Snacks"; snackBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40); snackBtn.TextColor3 = Color3.new(1, 1, 1)
+snackBtn.Size = UDim2.new(1, -10, 0, 35)
+snackBtn.Text = "Eat All Snacks"
+snackBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40)
+snackBtn.TextColor3 = Color3.new(1, 1, 1)
 snackBtn.MouseButton1Click:Connect(function()
-    local skip = {Weight=1, Punch=1, ["Ground Slam"]=1, Stomp=1, Handstands=1, Situps=1, Pushups=1, ["Protein Egg"]=1}
-    local char = player.Character
-    if not char then return end
-    local snacksToEat = {}
-    for _, t in ipairs(player.Backpack:GetChildren()) do
-        if t:IsA("Tool") and not skip[t.Name] then
-            table.insert(snacksToEat, t)
+    createConfirmPopup("Are you sure you want to eat ALL snacks? This cannot be undone.", function(confirmed)
+        if confirmed then
+            local skip = {Weight=1, Punch=1, ["Ground Slam"]=1, Stomp=1, Handstands=1, Situps=1, Pushups=1, ["Protein Egg"]=1}
+            local char = player.Character
+            if not char then return
+            local snacksToEat = {}
+            for _, t in ipairs(player.Backpack:GetChildren()) do
+                if t:IsA("Tool") and not skip[t.Name] then
+                    table.insert(snacksToEat, t)
+                end
+            end
+            for _, t in ipairs(snacksToEat) do
+                t.Parent = char
+                t:Activate()
+            end
+            task.wait()
+            for _, t in ipairs(snacksToEat) do
+                t.Parent = player.Backpack
+            end
         end
-    end
-    for _, t in ipairs(snacksToEat) do
-        t.Parent = char
-        t:Activate()
-    end
-    task.wait()
-    for _, t in ipairs(snacksToEat) do
-        t.Parent = player.Backpack
-    end
+    end)
 end)
 
 lockPosBtn = createToggle(f2, "Lock Position", "lockPosition", function(val)
@@ -1090,7 +1098,7 @@ rejoinBtn.MouseButton1Click:Connect(function()
     end)
 end)
 
--- NEW: Open All Chest button (replaces the old Auto Chest toggle)
+-- NEW: Open All Chest button
 local openAllChestsBtn = Instance.new("TextButton", f2)
 openAllChestsBtn.Size = UDim2.new(1, -10, 0, 35)
 openAllChestsBtn.Text = "Open All Chest"
@@ -1103,7 +1111,7 @@ openAllChestsBtn.MouseButton1Click:Connect(function()
         pcall(function()
             rs.rEvents.checkChestRemote:InvokeServer(chestName)
         end)
-        task.wait(0.3) -- small delay to avoid rate limiting
+        task.wait(0.3)
     end
 end)
 
@@ -1387,7 +1395,7 @@ local autoGymBtn = createToggle(f5, "Auto Gym", "autoGym", function(val)
 end)
 
 ----------------------------------------------------------------
--- TAB 6: AUTO CRYSTAL
+-- TAB 6: AUTO CRYSTAL (SIMPLIFIED EVOLVE: uses name only)
 ----------------------------------------------------------------
 local f6 = frames["Auto Crystal"]
 
@@ -1473,25 +1481,11 @@ local function scanCrystalShop()
 end
 scanCrystalShop()
 
--- Helper to get the folder path for a given crystal data (pet or aura)
-local function getItemFolder(data)
-    if data.folderChild:FindFirstChild("isPowerUp") then
-        -- It's an aura -> powerUpsFolder
-        local rarityFolder = data.rarity  -- e.g., "Basic", "Advanced", etc.
-        return player:FindFirstChild("powerUpsFolder") and player.powerUpsFolder:FindFirstChild(rarityFolder)
-    else
-        -- It's a pet -> petsFolder
-        local rarityFolder = data.rarity
-        return player:FindFirstChild("petsFolder") and player.petsFolder:FindFirstChild(rarityFolder)
-    end
-end
-
--- Helper to evolve an item (pet or aura)
-local function evolveItem(itemInstance)
-    if not itemInstance then return end
+-- Simplified evolve: uses only the item name
+local function evolveByName(itemName)
+    if not itemName then return end
     pcall(function()
-        local args = { [1] = "evolvePet", [2] = itemInstance }
-        ReplicatedStorage.rEvents.petEvolveEvent:FireServer(unpack(args, 1, 2))
+        ReplicatedStorage.rEvents.petEvolveEvent:FireServer(itemName)
     end)
 end
 
@@ -1568,7 +1562,7 @@ local function createCrystalSection(parent, title, list, stateKeyData, stateKeyN
         fireBuyCrystal(data)
     end)
     
-    -- Buy 5 instantly (no delay)
+    -- Buy 5 instantly
     local buy5Btn = Instance.new("TextButton", parent)
     buy5Btn.Size = UDim2.new(1, -10, 0, 35)
     buy5Btn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
@@ -1582,7 +1576,7 @@ local function createCrystalSection(parent, title, list, stateKeyData, stateKeyN
         end
     end)
     
-    -- Buy 5 & Evolve
+    -- Buy 5 & Evolve (simplified: uses name only)
     local buy5EvolveBtn = Instance.new("TextButton", parent)
     buy5EvolveBtn.Size = UDim2.new(1, -10, 0, 35)
     buy5EvolveBtn.BackgroundColor3 = Color3.fromRGB(100, 60, 40)
@@ -1592,46 +1586,17 @@ local function createCrystalSection(parent, title, list, stateKeyData, stateKeyN
         local data = states[stateKeyData]
         if not data then return end
         
-        local targetFolder = getItemFolder(data)
-        if not targetFolder then
-            infoLabel.Text = "Error: Cannot locate folder for " .. data.name
-            return
-        end
-        
-        local beforeItems = {}
-        for _, child in ipairs(targetFolder:GetChildren()) do
-            beforeItems[child.Name] = child
-        end
-        
+        -- Buy 5 copies instantly
         for _ = 1, 5 do
             fireBuyCrystal(data)
         end
         
+        -- Small delay to let server process purchases
         task.wait(0.5)
         
-        local newItem = nil
-        for _, child in ipairs(targetFolder:GetChildren()) do
-            if child.Name == data.name and not beforeItems[child.Name] then
-                newItem = child
-                break
-            end
-        end
-        
-        if not newItem then
-            for _, child in ipairs(targetFolder:GetChildren()) do
-                if not beforeItems[child.Name] then
-                    newItem = child
-                    break
-                end
-            end
-        end
-        
-        if newItem then
-            evolveItem(newItem)
-            infoLabel.Text = "Bought 5 and evolved " .. data.name
-        else
-            infoLabel.Text = "Bought 5 but could not find new " .. data.name .. " to evolve"
-        end
+        -- Evolve using just the name
+        evolveByName(data.name)
+        infoLabel.Text = "Bought 5 and evolved " .. data.name
     end)
     
     local autoBuyToggle = createToggle(parent, "Auto Buy", nil, function(on)
@@ -1796,7 +1761,7 @@ calcInput.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 calcInput.TextColor3 = Color3.new(1, 1, 1)
 calcInput.Font = Enum.Font.Gotham
 calcInput.TextSize = 14
-calcInput.ClearTextOnFocus = false   -- Keeps text when focusing
+calcInput.ClearTextOnFocus = false
 
 local calcResultLabel = Instance.new("TextLabel", f8)
 calcResultLabel.Size = UDim2.new(1, -10, 0, 30)
@@ -1824,7 +1789,7 @@ calcBtn.MouseButton1Click:Connect(function()
     end)
     if success then
         calcResultLabel.Text = "Result: " .. tostring(result)
-        calcInput.Text = ""   -- Clear only after successful calculation
+        calcInput.Text = ""
     else
         calcResultLabel.Text = "Result: Invalid expression"
     end
@@ -1862,7 +1827,7 @@ for _, tpData in ipairs(teleportList) do
 end
 
 ----------------------------------------------------------------
--- TAB 10: CONFIG (Updated to remove autoChest from saved states)
+-- TAB 10: CONFIG
 ----------------------------------------------------------------
 local f10 = frames["Config"]
 
@@ -2112,7 +2077,7 @@ removeConfigBtn.MouseButton1Click:Connect(function()
 end)
 
 ----------------------------------------------------------------
--- MAIN LOOPS (Auto Chest loop removed, other loops preserved)
+-- MAIN LOOPS
 ----------------------------------------------------------------
 table.insert(getgenv().ML_Expert_Loops, RunService.Heartbeat:Connect(function()
     if states.stopEverything then return end
