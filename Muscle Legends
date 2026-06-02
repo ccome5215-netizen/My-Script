@@ -910,23 +910,32 @@ snackBtn.Size = UDim2.new(1, -10, 0, 35)
 snackBtn.Text = "Eat All Snacks"
 snackBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40)
 snackBtn.TextColor3 = Color3.new(1, 1, 1)
+
 snackBtn.MouseButton1Click:Connect(function()
     createConfirmPopup("Are you sure you want to eat ALL snacks? This cannot be undone.", function(confirmed)
         if confirmed then
-            local skip = {Weight=1, Punch=1, ["Ground Slam"]=1, Stomp=1, Handstands=1, Situps=1, Pushups=1, ["Protein Egg"]=1}
+            local skip = {
+                Weight = 1, Punch = 1, ["Ground Slam"] = 1, Stomp = 1,
+                Handstands = 1, Situps = 1, Pushups = 1, ["Protein Egg"] = 1
+            }
+
             local char = player.Character
-            if not char then return
+            if not char then return end
+
             local snacksToEat = {}
             for _, t in ipairs(player.Backpack:GetChildren()) do
                 if t:IsA("Tool") and not skip[t.Name] then
                     table.insert(snacksToEat, t)
                 end
             end
+
             for _, t in ipairs(snacksToEat) do
                 t.Parent = char
                 t:Activate()
             end
+
             task.wait()
+
             for _, t in ipairs(snacksToEat) do
                 t.Parent = player.Backpack
             end
