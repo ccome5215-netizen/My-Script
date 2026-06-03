@@ -305,7 +305,7 @@ local function getStrength()
 end
 
 -- ================================================================
--- AUTO GYM SECTION
+-- AUTO GYM SECTION (FIXED: RESPAWN-PROOF + IMPROVED SEAT DETECTION)
 -- ================================================================
 
 local function findBestSeat(nearPos)
@@ -313,13 +313,19 @@ local function findBestSeat(nearPos)
     if not folder then return nil end
     local bestSeat = nil
     local bestDist = math.huge
+    -- Search for any seat or interactive part
     for _, machine in ipairs(folder:GetDescendants()) do
-        if machine:IsA("Seat") or machine:IsA("VehicleSeat") or
-           machine.Name:lower():find("seat") or machine.Name:lower():find("interact") then
+        -- Check if it's a seat or has a "Root" part or looks like a gym machine
+        local isSeat = machine:IsA("Seat") or machine:IsA("VehicleSeat")
+        local nameLow = machine.Name:lower()
+        local hasInteract = nameLow:find("seat") or nameLow:find("interact") or nameLow:find("machine") or nameLow:find("bench") or nameLow:find("press") or nameLow:find("lift")
+        
+        if isSeat or hasInteract then
+            -- Find the actual part we can interact with
             local rootPart = machine:FindFirstChild("Root") or
                             machine:FindFirstChildWhichIsA("BasePart") or
                             machine.Parent:FindFirstChildWhichIsA("BasePart")
-            if rootPart then
+            if rootPart and rootPart:IsA("BasePart") then
                 local dist = (rootPart.Position - nearPos).Magnitude
                 if dist < bestDist and dist < 80 then
                     bestDist = dist
@@ -350,48 +356,69 @@ local function startAutoGym()
     stopAutoGym()
     if not states.selectedMap or not states.selectedGym then return end
     states.autoGym = true
+    
     states.autoGymThread = task.spawn(function()
         while states.autoGym and states.selectedMap and states.selectedGym do
             if states.stopEverything then task.wait(); continue end
+            
             local mapData = gymData[states.selectedMap]
             if not mapData then break end
             local gym = mapData[states.selectedGym]
             if not gym then break end
-
+            
+            -- Wait for character to exist and be alive
+            local char = player.Character
+            while not char and states.autoGym do
+                task.wait(0.5)
+                char = player.Character
+            end
+            if not states.autoGym then break end
+            
+            local hum = char:FindFirstChild("Humanoid")
+            local root = char:FindFirstChild("HumanoidRootPart")
+            
+            -- If dead, wait for respawn
+            while (not hum or hum.Health <= 0) and states.autoGym do
+                task.wait(1)
+                char = player.Character
+                if char then
+                    hum = char:FindFirstChild("Humanoid")
+                    root = char:FindFirstChild("HumanoidRootPart")
+                end
+            end
+            if not states.autoGym then break end
+            
+            -- Check strength requirement
             if gym.cost and getStrength() < gym.cost then
-                task.wait()
+                task.wait(2)
                 continue
             end
+            
+            -- Check Muscle King requirement
             if states.selectedMap == "Muscle King Island" then
                 if not isLocalPlayerMuscleKing() and not isMuscleKingNone() then
-                    task.wait()
+                    task.wait(2)
                     continue
                 end
             end
-
-            local char = player.Character
-            if not char or not char:FindFirstChild("HumanoidRootPart") then
-                task.wait()
-                continue
-            end
-            local root = char.HumanoidRootPart
-            local hum = char:FindFirstChild("Humanoid")
-            if not hum or hum.Health <= 0 then
-                task.wait()
-                continue
-            end
-
+            
+            -- If already sitting, wait until not sitting
             if hum and hum.Sit then
-                task.wait()
+                task.wait(1)
                 continue
             end
-
-            root.CFrame = CFrame.new(gym.pos + Vector3.new(0, 4, 0))
-            root.AssemblyLinearVelocity = Vector3.zero
-            task.wait()
-
+            
+            -- Teleport to gym position
+            pcall(function()
+                root.CFrame = CFrame.new(gym.pos + Vector3.new(0, 4, 0))
+                root.AssemblyLinearVelocity = Vector3.zero
+            end)
+            task.wait(0.3)
+            
+            -- Attempt to sit on the gym machine
             local attempts = 0
-            while states.autoGym and hum and not hum.Sit do
+            local maxAttempts = 15
+            while states.autoGym and hum and not hum.Sit and attempts < maxAttempts do
                 if states.stopEverything then break end
                 local seat = findBestSeat(gym.pos)
                 if seat then
@@ -399,17 +426,35 @@ local function startAutoGym()
                 else
                     fireEKey()
                 end
-                task.wait()
+                task.wait(0.5)
                 attempts = attempts + 1
+                -- Every 5 attempts, re-teleport to ensure we're close
                 if attempts % 5 == 0 then
-                    root.CFrame = CFrame.new(gym.pos + Vector3.new(0, 4, 0))
+                    pcall(function()
+                        root.CFrame = CFrame.new(gym.pos + Vector3.new(0, 4, 0))
+                        root.AssemblyLinearVelocity = Vector3.zero
+                    end)
                 end
+                -- Refresh character references in case of respawn
+                char = player.Character
+                if char then
+                    hum = char:FindFirstChild("Humanoid")
+                    root = char:FindFirstChild("HumanoidRootPart")
+                end
+                if not hum or hum.Health <= 0 then break
             end
-
+            
+            -- If we sat down, wait until we stand up (exercise finishes)
             while states.autoGym and hum and hum.Sit do
                 if states.stopEverything then break end
-                task.wait()
+                task.wait(0.5)
+                char = player.Character
+                if char then hum = char:FindFirstChild("Humanoid") end
+                if not hum or hum.Health <= 0 then break
             end
+            
+            -- Small delay before next cycle
+            task.wait(0.3)
         end
         states.autoGym = false
     end)
