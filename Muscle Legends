@@ -305,43 +305,92 @@ local function getStrength()
 end
 
 -- ================================================================
--- AUTO GYM SECTION (FIXED: RESPAWN-PROOF + IMPROVED SEAT DETECTION)
+-- AUTO GYM SECTION — REBUILT
 -- ================================================================
 
+-- Helper: get fresh character parts, returns nil if dead/missing
+local function getCharParts()
+    local char = player.Character
+    if not char then return nil, nil, nil end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChild("Humanoid")
+    if not root or not hum then return nil, nil, nil end
+    if hum.Health <= 0 then return nil, nil, nil end
+    return char, root, hum
+end
+
+-- Improved seat finder: searches machinesFolder descendants broadly,
+-- including BaseParts named "Seat", "interact", "trigger", proximity prompts,
+-- and falls back to any BasePart close enough to the gym target pos.
 local function findBestSeat(nearPos)
     local folder = workspace:FindFirstChild("machinesFolder")
     if not folder then return nil end
+
     local bestSeat = nil
     local bestDist = math.huge
-    -- Search for any seat or interactive part
-    for _, machine in ipairs(folder:GetDescendants()) do
-        -- Check if it's a seat or has a "Root" part or looks like a gym machine
-        local isSeat = machine:IsA("Seat") or machine:IsA("VehicleSeat")
-        local nameLow = machine.Name:lower()
-        local hasInteract = nameLow:find("seat") or nameLow:find("interact") or nameLow:find("machine") or nameLow:find("bench") or nameLow:find("press") or nameLow:find("lift")
-        
-        if isSeat or hasInteract then
-            -- Find the actual part we can interact with
-            local rootPart = machine:FindFirstChild("Root") or
-                            machine:FindFirstChildWhichIsA("BasePart") or
-                            machine.Parent:FindFirstChildWhichIsA("BasePart")
-            if rootPart and rootPart:IsA("BasePart") then
-                local dist = (rootPart.Position - nearPos).Magnitude
-                if dist < bestDist and dist < 80 then
-                    bestDist = dist
-                    bestSeat = machine
-                end
+
+    for _, obj in ipairs(folder:GetDescendants()) do
+        -- Check actual Seat/VehicleSeat instances
+        local isSeatClass = obj:IsA("Seat") or obj:IsA("VehicleSeat")
+        -- Check BaseParts with seat-like names
+        local lname = obj.Name:lower()
+        local isSeatNamed = obj:IsA("BasePart") and (
+            lname == "seat" or lname == "interact" or lname == "trigger" or
+            lname == "clickpart" or lname == "touchpart" or lname:find("seat") or
+            lname:find("interact") or lname:find("click")
+        )
+        -- Check proximity prompts (ML uses these heavily)
+        local isPromptPart = obj:IsA("ProximityPrompt")
+
+        if isSeatClass or isSeatNamed or isPromptPart then
+            local checkPart = obj
+            if isPromptPart then
+                checkPart = obj.Parent
+                if not checkPart or not checkPart:IsA("BasePart") then continue end
+            end
+            if not checkPart:IsA("BasePart") then continue end
+
+            local dist = (checkPart.Position - nearPos).Magnitude
+            if dist < bestDist and dist < 80 then
+                bestDist = dist
+                bestSeat = checkPart
             end
         end
     end
+
     return bestSeat
 end
 
-local function fireMachineInteract(seat)
+-- Fire interact remote with the seat part (tries multiple arg formats ML uses)
+local function fireMachineInteract(seatPart)
+    if not seatPart then return end
+    -- Try the machineInteractRemote invoke
     pcall(function()
-        local args = { [1] = "useMachine", [2] = seat }
-        ReplicatedStorage.rEvents.machineInteractRemote:InvokeServer(unpack(args))
+        ReplicatedStorage.rEvents.machineInteractRemote:InvokeServer("useMachine", seatPart)
     end)
+    -- Also try firing with just the part (some ML versions accept this)
+    pcall(function()
+        ReplicatedStorage.rEvents.machineInteractRemote:InvokeServer(seatPart)
+    end)
+    -- Try proximity prompt trigger if there's one on/in the part
+    pcall(function()
+        local prompt = seatPart:FindFirstChildOfClass("ProximityPrompt") or
+                       seatPart.Parent and seatPart.Parent:FindFirstChildOfClass("ProximityPrompt")
+        if prompt then
+            fireEKey()
+        end
+    end)
+end
+
+-- Check if the character is genuinely sitting (Humanoid.Sit AND SeatPart assigned)
+-- This avoids the stale-true bug where Sit stays true briefly after respawn
+local function isActuallySitting(hum)
+    if not hum then return false end
+    if not hum.Sit then return false end
+    -- Extra check: SeatPart being set confirms it's a real sit
+    if hum.SeatPart ~= nil then return true end
+    -- If Sit is true but SeatPart is nil, it's likely a stale state — treat as not sitting
+    return false
 end
 
 local function stopAutoGym()
@@ -352,110 +401,100 @@ local function stopAutoGym()
     states.autoGym = false
 end
 
+-- Rebuilt Auto Gym loop — mirrors the reliability pattern of autoEquip:
+-- Always re-fetches char/root/hum fresh each iteration, never caches them across iterations,
+-- recovers instantly from respawn/death, and never gets stuck in a stale Sit state.
 local function startAutoGym()
     stopAutoGym()
     if not states.selectedMap or not states.selectedGym then return end
     states.autoGym = true
-    
+
     states.autoGymThread = task.spawn(function()
-        while states.autoGym and states.selectedMap and states.selectedGym do
-            if states.stopEverything then task.wait(); continue end
-            
+        -- Track which sit cycle we're in so we can detect "rep done" via SeatPart going nil
+        local wasActuallySitting = false
+        local sitAttemptStart = 0
+        local SIT_TIMEOUT = 8 -- seconds before we assume seat interaction failed and retry teleport
+
+        while states.autoGym do
+            task.wait() -- yield every frame, like autoEquip does
+
+            if states.stopEverything then continue end
+            if not states.selectedMap or not states.selectedGym then break end
+
+            -- Always validate gym data fresh
             local mapData = gymData[states.selectedMap]
             if not mapData then break end
             local gym = mapData[states.selectedGym]
             if not gym then break end
-            
-            -- Wait for character to exist and be alive
-            local char = player.Character
-            while not char and states.autoGym do
-                task.wait(0.5)
-                char = player.Character
-            end
-            if not states.autoGym then break end
-            
-            local hum = char:FindFirstChild("Humanoid")
-            local root = char:FindFirstChild("HumanoidRootPart")
-            
-            -- If dead, wait for respawn
-            while (not hum or hum.Health <= 0) and states.autoGym do
-                task.wait(1)
-                char = player.Character
-                if char then
-                    hum = char:FindFirstChild("Humanoid")
-                    root = char:FindFirstChild("HumanoidRootPart")
-                end
-            end
-            if not states.autoGym then break end
-            
-            -- Check strength requirement
-            if gym.cost and getStrength() < gym.cost then
-                task.wait(2)
-                continue
-            end
-            
-            -- Check Muscle King requirement
+
+            -- Strength gate
+            if gym.cost and getStrength() < gym.cost then continue end
+
+            -- Muscle King island permission gate
             if states.selectedMap == "Muscle King Island" then
-                if not isLocalPlayerMuscleKing() and not isMuscleKingNone() then
-                    task.wait(2)
-                    continue
-                end
+                if not isLocalPlayerMuscleKing() and not isMuscleKingNone() then continue end
             end
-            
-            -- If already sitting, wait until not sitting
-            if hum and hum.Sit then
-                task.wait(1)
+
+            -- Fresh character fetch every frame — key to never going stale after respawn
+            local char, root, hum = getCharParts()
+            if not char or not root or not hum then
+                wasActuallySitting = false
+                sitAttemptStart = 0
                 continue
             end
-            
-            -- Teleport to gym position
-            pcall(function()
-                root.CFrame = CFrame.new(gym.pos + Vector3.new(0, 4, 0))
-                root.AssemblyLinearVelocity = Vector3.zero
-            end)
-            task.wait(0.3)
-            
-            -- Attempt to sit on the gym machine
-            local attempts = 0
-            local maxAttempts = 15
-            while states.autoGym and hum and not hum.Sit and attempts < maxAttempts do
-                if states.stopEverything then break end
-                local seat = findBestSeat(gym.pos)
-                if seat then
-                    fireMachineInteract(seat)
-                else
-                    fireEKey()
-                end
-                task.wait(0.5)
-                attempts = attempts + 1
-                -- Every 5 attempts, re-teleport to ensure we're close
-                if attempts % 5 == 0 then
-                    pcall(function()
-                        root.CFrame = CFrame.new(gym.pos + Vector3.new(0, 4, 0))
-                        root.AssemblyLinearVelocity = Vector3.zero
-                    end)
-                end
-                -- Refresh character references in case of respawn
-                char = player.Character
-                if char then
-                    hum = char:FindFirstChild("Humanoid")
-                    root = char:FindFirstChild("HumanoidRootPart")
-                end
-                if not hum or hum.Health <= 0 then break
+
+            local currentlySitting = isActuallySitting(hum)
+
+            if currentlySitting then
+                -- We are in a valid sit — just wait for the rep to finish (SeatPart goes nil)
+                wasActuallySitting = true
+                sitAttemptStart = 0
+                continue
             end
-            
-            -- If we sat down, wait until we stand up (exercise finishes)
-            while states.autoGym and hum and hum.Sit do
-                if states.stopEverything then break end
-                task.wait(0.5)
-                char = player.Character
-                if char then hum = char:FindFirstChild("Humanoid") end
-                if not hum or hum.Health <= 0 then break
+
+            -- Not sitting. If we WERE sitting last frame, the rep just finished — immediately loop back.
+            wasActuallySitting = false
+
+            -- Check if we've been trying to sit for too long (stuck state) → re-teleport
+            if sitAttemptStart > 0 and (os.clock() - sitAttemptStart) > SIT_TIMEOUT then
+                sitAttemptStart = 0
+                -- Force re-teleport to unstick
+                pcall(function()
+                    root.CFrame = CFrame.new(gym.pos + Vector3.new(0, 4, 0))
+                    root.AssemblyLinearVelocity = Vector3.zero
+                end)
+                task.wait(0.15)
+                continue
             end
-            
-            -- Small delay before next cycle
-            task.wait(0.3)
+
+            -- If we haven't started a sit attempt yet, teleport to the gym first
+            if sitAttemptStart == 0 then
+                pcall(function()
+                    root.CFrame = CFrame.new(gym.pos + Vector3.new(0, 4, 0))
+                    root.AssemblyLinearVelocity = Vector3.zero
+                end)
+                task.wait(0.15)
+                sitAttemptStart = os.clock()
+                continue
+            end
+
+            -- We are in a sit-attempt window — try to interact
+            local seat = findBestSeat(gym.pos)
+            if seat then
+                fireMachineInteract(seat)
+            else
+                fireEKey()
+            end
+
+            -- Re-teleport every 1.5s if still not seated (drift correction)
+            if (os.clock() - sitAttemptStart) % 1.5 < 0.02 then
+                pcall(function()
+                    root.CFrame = CFrame.new(gym.pos + Vector3.new(0, 4, 0))
+                    root.AssemblyLinearVelocity = Vector3.zero
+                end)
+            end
         end
+
         states.autoGym = false
     end)
 end
@@ -1397,7 +1436,7 @@ dropdownHeaderSetters["selectGym"] = gymDD
 local gymBtn = Instance.new("TextButton", f5)
 gymBtn.Size = UDim2.new(1, -10, 0, 35)
 gymBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
-gymBtn.Text = "Gym"
+gymBtn.Text = "Gym (One Shot)"
 gymBtn.TextColor3 = Color3.new(1, 1, 1)
 gymBtn.MouseButton1Click:Connect(function()
     if not states.selectedMap or not states.selectedGym then return end
@@ -1408,16 +1447,17 @@ gymBtn.MouseButton1Click:Connect(function()
     if states.selectedMap == "Muscle King Island" then
         if not isLocalPlayerMuscleKing() and not isMuscleKingNone() then return end
     end
-    local chr = player.Character
-    if not chr or not chr:FindFirstChild("HumanoidRootPart") then return end
-    local hum = chr:FindFirstChild("Humanoid")
-    if hum and hum.Sit then return end
+    local char, root, hum = getCharParts()
+    if not char then return end
+    if isActuallySitting(hum) then return end
     
-    chr.HumanoidRootPart.CFrame = CFrame.new(gym.pos + Vector3.new(0, 4, 0))
-    chr.HumanoidRootPart.AssemblyLinearVelocity = Vector3.zero
+    root.CFrame = CFrame.new(gym.pos + Vector3.new(0, 4, 0))
+    root.AssemblyLinearVelocity = Vector3.zero
     
     task.spawn(function()
-        while hum and not hum.Sit do
+        task.wait(0.15)
+        local attempts = 0
+        while hum and not isActuallySitting(hum) and attempts < 30 do
             if states.stopEverything then break end
             local seat = findBestSeat(gym.pos)
             if seat then
@@ -1425,7 +1465,14 @@ gymBtn.MouseButton1Click:Connect(function()
             else
                 fireEKey()
             end
-            task.wait()
+            task.wait(0.2)
+            attempts = attempts + 1
+            if attempts % 5 == 0 then
+                local _, r2, _ = getCharParts()
+                if r2 then
+                    r2.CFrame = CFrame.new(gym.pos + Vector3.new(0, 4, 0))
+                end
+            end
         end
     end)
 end)
@@ -1439,6 +1486,32 @@ local autoGymBtn = createToggle(f5, "Auto Gym", "autoGym", function(val)
     end
     return val
 end)
+
+-- Status label so the user can see what auto gym is doing
+local gymStatusLabel = Instance.new("TextLabel", f5)
+gymStatusLabel.Size = UDim2.new(1, -10, 0, 20)
+gymStatusLabel.BackgroundTransparency = 1
+gymStatusLabel.TextColor3 = Color3.fromRGB(150, 255, 150)
+gymStatusLabel.Font = Enum.Font.Gotham
+gymStatusLabel.TextSize = 11
+gymStatusLabel.Text = "Auto Gym: Idle"
+gymStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+-- Update the status label every frame based on gym state
+table.insert(getgenv().ML_Expert_Loops, RunService.Heartbeat:Connect(function()
+    if not states.autoGym then
+        gymStatusLabel.Text = "Auto Gym: OFF"
+        return
+    end
+    local _, _, hum = getCharParts()
+    if not hum then
+        gymStatusLabel.Text = "Auto Gym: Waiting for respawn..."
+    elseif isActuallySitting(hum) then
+        gymStatusLabel.Text = "Auto Gym: Repping ✓"
+    else
+        gymStatusLabel.Text = "Auto Gym: Teleporting / Sitting..."
+    end
+end))
 
 ----------------------------------------------------------------
 -- TAB 6: AUTO CRYSTAL
