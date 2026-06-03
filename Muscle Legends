@@ -1,6 +1,3 @@
--- ================================================================
--- MUSCLE LEGENDS EXPERT SCRIPT v5 (FULL FEATURE - FINAL)
--- ================================================================
 if getgenv().ML_Expert_UI then pcall(function() getgenv().ML_Expert_UI:Destroy() end) end
 if getgenv().ML_Expert_Loops then
     for _, loop in ipairs(getgenv().ML_Expert_Loops) do pcall(task.cancel, loop) end
@@ -73,7 +70,8 @@ local states = {
     autoPetBuy = false, autoPetBuyThread = nil,
     autoAuraBuy = false, autoAuraBuyThread = nil,
     autoUnequipBoosts = false,
-    stopEverything = false
+    stopEverything = false,
+    walkOnWater = true
 }
 
 local rockCache = {}
@@ -101,7 +99,6 @@ local rockData = {
     ["Jungle Rock"]      = {req = 10000000,name = "Ancient Jungle Rock", idx = 1, glitchValue = 16.25}
 }
 
--- Gym data (unchanged)
 local gymData = {
     ["Tiny Island"] = {
         ["Bench Press"] = {pos = Vector3.new(67.105286, 6.714245, 1984.269043), cost = 10},
@@ -772,7 +769,7 @@ local function createDropdown(parent, text, options, multi, callback, checkState
                 callback(val)
             end
         end,
-        optionsList = options -- for checking valid values
+        optionsList = options
     }
 end
 
@@ -794,14 +791,12 @@ end
 ----------------------------------------------------------------
 local f1 = frames["Auto Farm"]
 
--- Select Rock dropdown
 local selectRockDD = createDropdown(f1, "Select Rock", {"Tiny Rock", "Punching Rock", "Large Rock", "Golden Rock", "Frozen Rock", "Mystic Rock", "Inferno Rock", "Legend Rock", "Muscle King Rock", "Jungle Rock"}, false, function(v) 
     if states.autoGlitch then handleGlitchCleanup(states.selectedMethod, function() states.selectedRock = v end) else states.selectedRock = v end
 end)
 dropdownSetters["selectRock"] = selectRockDD
 dropdownHeaderSetters["selectRock"] = selectRockDD
 
--- Select Method dropdown
 local selectMethodDD = createDropdown(f1, "Select Method", {"Teleport", "NonTeleport"}, false, function(v) 
     if states.autoGlitch and states.selectedMethod ~= v then
         handleGlitchCleanup(states.selectedMethod, function()
@@ -817,7 +812,6 @@ end)
 dropdownSetters["selectMethod"] = selectMethodDD
 dropdownHeaderSetters["selectMethod"] = selectMethodDD
 
--- Tool dropdown
 local toolDD = createDropdown(f1, "Tool Dropdown", {"Weight", "Pushups", "Situps", "Handstands"}, false, function(v) states.selectedTool = v end)
 dropdownSetters["toolDropdown"] = toolDD
 dropdownHeaderSetters["toolDropdown"] = toolDD
@@ -913,7 +907,6 @@ local rebBox = Instance.new("TextBox", f1)
 rebBox.Size = UDim2.new(1, -10, 0, 30); rebBox.Text = Config.RebirthTarget; rebBox.PlaceholderText = "Rebirth Target"; rebBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); rebBox.TextColor3 = Color3.new(1, 1, 1)
 rebBox.FocusLost:Connect(function() Config.RebirthTarget = rebBox.Text; SaveConfig() end)
 
--- Rebirth toggles with confirm popup
 do
     local function createRebirthConfirmToggle(parent, text, key, stateKey, otherStateKey, otherKey)
         local btn = Instance.new("TextButton", parent)
@@ -990,7 +983,7 @@ end)
 createToggle(f1, "Fast Punch", "fastPunch", function(val) states.fastPunch = val; local p = getPunch(); if p and p:FindFirstChild("attackTime") then p.attackTime.Value = val and 0 or 0.35 end end)
 
 ----------------------------------------------------------------
--- TAB 2: FARM (UPDATED: Removed Auto Chest toggle, added Open All Chest button)
+-- TAB 2: FARM
 ----------------------------------------------------------------
 local f2 = frames["Farm"]
 createToggle(f2, "Less Lag", "lessLag", function(val) states.lessLag = val end)
@@ -1030,25 +1023,32 @@ copyPosBtn.Size = UDim2.new(1, -10, 0, 35); copyPosBtn.Text = "Copy My Position"
 copyPosBtn.MouseButton1Click:Connect(function() if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then local pos = player.Character.HumanoidRootPart.Position; pcall(function() setclipboard(string.format("%f, %f, %f", pos.X, pos.Y, pos.Z)) end) end end)
 
 local snackBtn = Instance.new("TextButton", f2)
-snackBtn.Size = UDim2.new(1, -10, 0, 35); snackBtn.Text = "Eat All Snacks"; snackBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40); snackBtn.TextColor3 = Color3.new(1, 1, 1)
+snackBtn.Size = UDim2.new(1, -10, 0, 35)
+snackBtn.Text = "Eat All Snacks"
+snackBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40)
+snackBtn.TextColor3 = Color3.new(1, 1, 1)
 snackBtn.MouseButton1Click:Connect(function()
-    local skip = {Weight=1, Punch=1, ["Ground Slam"]=1, Stomp=1, Handstands=1, Situps=1, Pushups=1, ["Protein Egg"]=1}
-    local char = player.Character
-    if not char then return end
-    local snacksToEat = {}
-    for _, t in ipairs(player.Backpack:GetChildren()) do
-        if t:IsA("Tool") and not skip[t.Name] then
-            table.insert(snacksToEat, t)
+    createConfirmPopup("Are you sure you want to eat ALL snacks? This cannot be undone.", function(confirmed)
+        if confirmed then
+            local skip = {Weight=1, Punch=1, ["Ground Slam"]=1, Stomp=1, Handstands=1, Situps=1, Pushups=1, ["Protein Egg"]=1}
+            local char = player.Character
+            if not char then return end
+            local snacksToEat = {}
+            for _, t in ipairs(player.Backpack:GetChildren()) do
+                if t:IsA("Tool") and not skip[t.Name] then
+                    table.insert(snacksToEat, t)
+                end
+            end
+            for _, t in ipairs(snacksToEat) do
+                t.Parent = char
+                t:Activate()
+            end
+            task.wait()
+            for _, t in ipairs(snacksToEat) do
+                t.Parent = player.Backpack
+            end
         end
-    end
-    for _, t in ipairs(snacksToEat) do
-        t.Parent = char
-        t:Activate()
-    end
-    task.wait()
-    for _, t in ipairs(snacksToEat) do
-        t.Parent = player.Backpack
-    end
+    end)
 end)
 
 lockPosBtn = createToggle(f2, "Lock Position", "lockPosition", function(val)
@@ -1067,6 +1067,16 @@ lockPosBtn = createToggle(f2, "Lock Position", "lockPosition", function(val)
             hrp.AssemblyLinearVelocity = Vector3.zero
             hrp.AssemblyAngularVelocity = Vector3.zero
         end
+    end
+    return val
+end)
+
+local walkOnWaterPlatform = nil
+local walkOnWaterBtn = createToggle(f2, "Walk on Water", "walkOnWater", function(val)
+    states.walkOnWater = val
+    if not val and walkOnWaterPlatform then
+        walkOnWaterPlatform:Destroy()
+        walkOnWaterPlatform = nil
     end
     return val
 end)
@@ -1090,7 +1100,6 @@ rejoinBtn.MouseButton1Click:Connect(function()
     end)
 end)
 
--- NEW: Open All Chest button (replaces the old Auto Chest toggle)
 local openAllChestsBtn = Instance.new("TextButton", f2)
 openAllChestsBtn.Size = UDim2.new(1, -10, 0, 35)
 openAllChestsBtn.Text = "Open All Chest"
@@ -1103,7 +1112,7 @@ openAllChestsBtn.MouseButton1Click:Connect(function()
         pcall(function()
             rs.rEvents.checkChestRemote:InvokeServer(chestName)
         end)
-        task.wait(0.3) -- small delay to avoid rate limiting
+        task.wait(0.3)
     end
 end)
 
@@ -1443,7 +1452,6 @@ local function scanCrystalShop()
         end
     end
     
-    -- Sort by rarity order first, then by cost (low to high)
     local rarityOrder = {["Basic"] = 1, ["Advanced"] = 2, ["Rare"] = 3, ["Epic"] = 4, ["Unique"] = 5}
     table.sort(pets, function(a, b)
         local orderA = rarityOrder[a.rarity] or 99
@@ -1473,25 +1481,10 @@ local function scanCrystalShop()
 end
 scanCrystalShop()
 
--- Helper to get the folder path for a given crystal data (pet or aura)
-local function getItemFolder(data)
-    if data.folderChild:FindFirstChild("isPowerUp") then
-        -- It's an aura -> powerUpsFolder
-        local rarityFolder = data.rarity  -- e.g., "Basic", "Advanced", etc.
-        return player:FindFirstChild("powerUpsFolder") and player.powerUpsFolder:FindFirstChild(rarityFolder)
-    else
-        -- It's a pet -> petsFolder
-        local rarityFolder = data.rarity
-        return player:FindFirstChild("petsFolder") and player.petsFolder:FindFirstChild(rarityFolder)
-    end
-end
-
--- Helper to evolve an item (pet or aura)
-local function evolveItem(itemInstance)
-    if not itemInstance then return end
+local function evolveByName(itemName)
+    if not itemName then return end
     pcall(function()
-        local args = { [1] = "evolvePet", [2] = itemInstance }
-        ReplicatedStorage.rEvents.petEvolveEvent:FireServer(unpack(args, 1, 2))
+        ReplicatedStorage.rEvents.petEvolveEvent:FireServer(itemName)
     end)
 end
 
@@ -1568,7 +1561,6 @@ local function createCrystalSection(parent, title, list, stateKeyData, stateKeyN
         fireBuyCrystal(data)
     end)
     
-    -- Buy 5 instantly (no delay)
     local buy5Btn = Instance.new("TextButton", parent)
     buy5Btn.Size = UDim2.new(1, -10, 0, 35)
     buy5Btn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
@@ -1582,7 +1574,6 @@ local function createCrystalSection(parent, title, list, stateKeyData, stateKeyN
         end
     end)
     
-    -- Buy 5 & Evolve
     local buy5EvolveBtn = Instance.new("TextButton", parent)
     buy5EvolveBtn.Size = UDim2.new(1, -10, 0, 35)
     buy5EvolveBtn.BackgroundColor3 = Color3.fromRGB(100, 60, 40)
@@ -1591,47 +1582,12 @@ local function createCrystalSection(parent, title, list, stateKeyData, stateKeyN
     buy5EvolveBtn.MouseButton1Click:Connect(function()
         local data = states[stateKeyData]
         if not data then return end
-        
-        local targetFolder = getItemFolder(data)
-        if not targetFolder then
-            infoLabel.Text = "Error: Cannot locate folder for " .. data.name
-            return
-        end
-        
-        local beforeItems = {}
-        for _, child in ipairs(targetFolder:GetChildren()) do
-            beforeItems[child.Name] = child
-        end
-        
         for _ = 1, 5 do
             fireBuyCrystal(data)
         end
-        
         task.wait(0.5)
-        
-        local newItem = nil
-        for _, child in ipairs(targetFolder:GetChildren()) do
-            if child.Name == data.name and not beforeItems[child.Name] then
-                newItem = child
-                break
-            end
-        end
-        
-        if not newItem then
-            for _, child in ipairs(targetFolder:GetChildren()) do
-                if not beforeItems[child.Name] then
-                    newItem = child
-                    break
-                end
-            end
-        end
-        
-        if newItem then
-            evolveItem(newItem)
-            infoLabel.Text = "Bought 5 and evolved " .. data.name
-        else
-            infoLabel.Text = "Bought 5 but could not find new " .. data.name .. " to evolve"
-        end
+        evolveByName(data.name)
+        infoLabel.Text = "Bought 5 and evolved " .. data.name
     end)
     
     local autoBuyToggle = createToggle(parent, "Auto Buy", nil, function(on)
@@ -1796,7 +1752,7 @@ calcInput.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 calcInput.TextColor3 = Color3.new(1, 1, 1)
 calcInput.Font = Enum.Font.Gotham
 calcInput.TextSize = 14
-calcInput.ClearTextOnFocus = false   -- Keeps text when focusing
+calcInput.ClearTextOnFocus = false
 
 local calcResultLabel = Instance.new("TextLabel", f8)
 calcResultLabel.Size = UDim2.new(1, -10, 0, 30)
@@ -1824,7 +1780,7 @@ calcBtn.MouseButton1Click:Connect(function()
     end)
     if success then
         calcResultLabel.Text = "Result: " .. tostring(result)
-        calcInput.Text = ""   -- Clear only after successful calculation
+        calcInput.Text = ""
     else
         calcResultLabel.Text = "Result: Invalid expression"
     end
@@ -1838,7 +1794,7 @@ local f9 = frames["Teleport"]
 local teleportList = {
     {name = "Safe Spot", pos = Vector3.new(218.565002, 41.153748, -8129.369629)},
     {name = "Tiny Island", pos = Vector3.new(-33.693745, 7.456870, 1892.807007)},
-    {name = "Beach Island", pos = Vector3.new(4.466469, 7.303733, 132.878891)},
+    {name = "Beach", pos = Vector3.new(4.466469, 7.303733, 132.878891)},
     {name = "Frozen Island", pos = Vector3.new(-2623.022217, 7.303728, -409.073334)},
     {name = "Mystic Island", pos = Vector3.new(2250.778076, 7.303732, 1073.226685)},
     {name = "Inferno Island", pos = Vector3.new(-6758.963867, 7.303741, -1284.918701)},
@@ -1862,7 +1818,7 @@ for _, tpData in ipairs(teleportList) do
 end
 
 ----------------------------------------------------------------
--- TAB 10: CONFIG (Updated to remove autoChest from saved states)
+-- TAB 10: CONFIG
 ----------------------------------------------------------------
 local f10 = frames["Config"]
 
@@ -1908,7 +1864,6 @@ local function stopAllAutomations()
     stopAutoAuraBuy()
 end
 
--- Save Config button
 local saveBtn = Instance.new("TextButton", f10)
 saveBtn.Size = UDim2.new(1, -10, 0, 35)
 saveBtn.Text = "Save Config"
@@ -1957,7 +1912,8 @@ saveBtn.MouseButton1Click:Connect(function()
             selectedGym = states.selectedGym,
             autoGym = states.autoGym,
             autoUnequipBoosts = states.autoUnequipBoosts,
-            lockPosition = states.lockedPos ~= nil
+            lockPosition = states.lockedPos ~= nil,
+            walkOnWater = states.walkOnWater
         }
     }
     savedConfigs[name] = preset
@@ -1969,13 +1925,11 @@ saveBtn.MouseButton1Click:Connect(function()
     configDropdown.setHeaderText("Saved Config v")
 end)
 
--- Stop Everything toggle
 createToggle(f10, "Stop Everything", "stopEverything", function(val)
     states.stopEverything = val
     return val
 end)
 
--- Load Config button
 local loadBtn = Instance.new("TextButton", f10)
 loadBtn.Size = UDim2.new(1, -10, 0, 35)
 loadBtn.Text = "Load Config"
@@ -2036,7 +1990,8 @@ loadBtn.MouseButton1Click:Connect(function()
             trackStats = "trackStats",
             withoutFormatNum = "withoutFormatNum",
             viewing = "viewing",
-            lockPosition = "lockPosition"
+            lockPosition = "lockPosition",
+            walkOnWater = "walkOnWater"
         }
         
         for stateKey, toggleKey in pairs(toggleStateMap) do
@@ -2087,7 +2042,6 @@ loadBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- Remove Config button
 local removeConfigBtn = Instance.new("TextButton", f10)
 removeConfigBtn.Size = UDim2.new(1, -10, 0, 35)
 removeConfigBtn.Text = "Remove Config"
@@ -2112,7 +2066,7 @@ removeConfigBtn.MouseButton1Click:Connect(function()
 end)
 
 ----------------------------------------------------------------
--- MAIN LOOPS (Auto Chest loop removed, other loops preserved)
+-- MAIN LOOPS
 ----------------------------------------------------------------
 table.insert(getgenv().ML_Expert_Loops, RunService.Heartbeat:Connect(function()
     if states.stopEverything then return end
@@ -2130,9 +2084,31 @@ table.insert(getgenv().ML_Expert_Loops, RunService.Heartbeat:Connect(function()
     end
 end))
 
--- Anti-void loop
+local function getTeleportPosForMap(currentMap)
+    if not currentMap or currentMap == "" then return Vector3.new(4.466469, 7.303733, 132.878891) end
+    local lowerMap = currentMap:lower()
+    if lowerMap:find("jungle") then
+        return Vector3.new(-8685.621094, 6.732735, 2392.326660)
+    elseif lowerMap:find("muscle king") then
+        return Vector3.new(-8625.929688, 17.153761, -5730.473145)
+    elseif lowerMap:find("beach") then
+        return Vector3.new(4.466469, 7.303733, 132.878891)
+    elseif lowerMap:find("tiny") then
+        return Vector3.new(-33.693745, 7.456870, 1892.807007)
+    elseif lowerMap:find("frozen") then
+        return Vector3.new(-2623.022217, 7.303728, -409.073334)
+    elseif lowerMap:find("mystic") then
+        return Vector3.new(2250.778076, 7.303732, 1073.226685)
+    elseif lowerMap:find("inferno") then
+        return Vector3.new(-6758.963867, 7.303741, -1284.918701)
+    elseif lowerMap:find("legend") then
+        return Vector3.new(4603.281738, 991.481750, -3897.865723)
+    else
+        return Vector3.new(4.466469, 7.303733, 132.878891)
+    end
+end
+
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
-    local beachPos = Vector3.new(4.466469, 7.303733, 132.878891)
     while true do
         task.wait(0.5)
         if states.stopEverything then continue end
@@ -2140,8 +2116,10 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         if char and char:FindFirstChild("HumanoidRootPart") then
             local root = char.HumanoidRootPart
             if root.Position.Y < -50 then
+                local currentMap = player:FindFirstChild("currentMap") and player.currentMap.Value or ""
+                local teleportPos = getTeleportPosForMap(currentMap)
                 pcall(function()
-                    root.CFrame = CFrame.new(beachPos)
+                    root.CFrame = CFrame.new(teleportPos)
                     root.AssemblyLinearVelocity = Vector3.zero
                 end)
             end
@@ -2149,35 +2127,43 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Walk on water
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     local waterPart = workspace:FindFirstChild("underSea")
     if not waterPart or not waterPart:IsA("BasePart") then return end
     local waterY = waterPart.Position.Y
 
-    local platform = Instance.new("Part")
-    platform.Name = "ML_WalkOnWaterPlatform"
-    platform.Size = Vector3.new(10, 1, 10)
-    platform.Anchored = true
-    platform.CanCollide = true
-    platform.Transparency = 1
-    platform.Parent = workspace
-
-    local old = workspace:FindFirstChild("ML_WalkOnWaterPlatform")
-    if old and old ~= platform then old:Destroy() end
-
     while true do
-        task.wait(0.05)
-        if states.stopEverything then continue end
+        if not states.walkOnWater then
+            if walkOnWaterPlatform then
+                walkOnWaterPlatform:Destroy()
+                walkOnWaterPlatform = nil
+            end
+            task.wait(0.5)
+            continue
+        end
+
+        if not walkOnWaterPlatform then
+            walkOnWaterPlatform = Instance.new("Part")
+            walkOnWaterPlatform.Name = "ML_WalkOnWaterPlatform"
+            walkOnWaterPlatform.Size = Vector3.new(10, 1, 10)
+            walkOnWaterPlatform.Anchored = true
+            walkOnWaterPlatform.CanCollide = true
+            walkOnWaterPlatform.Transparency = 1
+            walkOnWaterPlatform.Parent = workspace
+            local old = workspace:FindFirstChild("ML_WalkOnWaterPlatform")
+            if old and old ~= walkOnWaterPlatform then old:Destroy() end
+        end
+
         local char = player.Character
         if char and char:FindFirstChild("HumanoidRootPart") then
             local root = char.HumanoidRootPart
-            platform.CFrame = CFrame.new(root.Position.X, waterY, root.Position.Z)
+            walkOnWaterPlatform.CFrame = CFrame.new(root.Position.X, waterY, root.Position.Z)
         end
+
+        task.wait(0.05)
     end
 end))
 
--- UnEquip Boosts
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     local allowedWorkoutTools = {
         ["Punch"] = true, ["Weight"] = true, ["Stomp"] = true,
@@ -2200,7 +2186,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- God mode, size, fly, walkspeed
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
@@ -2246,7 +2231,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Weight Glue
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         task.wait()
@@ -2288,7 +2272,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Auto Equip Tool
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
@@ -2338,7 +2321,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Auto Glitch Loop
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         task.wait()
@@ -2412,7 +2394,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Kill logic
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
@@ -2455,7 +2436,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Auto Lift No Anim
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function() 
     while true do 
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
@@ -2464,7 +2444,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end 
 end))
 
--- Auto Claim Gift
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while task.wait(1) do
         if states.stopEverything then continue end
@@ -2478,7 +2457,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Auto Fortune Wheel
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while task.wait(1) do
         if states.stopEverything then continue end
@@ -2494,7 +2472,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Rebirth, Stats, View Player, Pet/Aura refresh
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while task.wait() do
         if states.stopEverything then continue end
@@ -2587,7 +2564,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Player list refresh
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while task.wait(1) do 
         if states.stopEverything then continue end
@@ -2607,7 +2583,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Anti-AFK
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while task.wait(600) do
         if states.stopEverything then continue end
@@ -2619,7 +2594,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Fast Punch / Auto Punch / Accel Reps
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
@@ -2649,3 +2623,5 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         end
     end
 end))
+
+SetToggle[walkOnWaterBtn](true)
