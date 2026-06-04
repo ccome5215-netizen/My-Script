@@ -305,92 +305,84 @@ local function getStrength()
 end
 
 -- ================================================================
--- AUTO GYM SECTION — REBUILT
+-- AUTO GYM SECTION
 -- ================================================================
 
--- Helper: get fresh character parts, returns nil if dead/missing
-local function getCharParts()
-    local char = player.Character
-    if not char then return nil, nil, nil end
-    local root = char:FindFirstChild("HumanoidRootPart")
-    local hum = char:FindFirstChild("Humanoid")
-    if not root or not hum then return nil, nil, nil end
-    if hum.Health <= 0 then return nil, nil, nil end
-    return char, root, hum
-end
-
--- Improved seat finder: searches machinesFolder descendants broadly,
--- including BaseParts named "Seat", "interact", "trigger", proximity prompts,
--- and falls back to any BasePart close enough to the gym target pos.
+-- Improved 4-pass seat/machine detector.
+-- Pass 1: real Seat / VehicleSeat (most reliable server-side reference)
+-- Pass 2: BaseParts named "interact", "trigger", "prompt", or "root"
+-- Pass 3: machine Model primary parts (handles most ML gym machines)
+-- Pass 4: any closest BasePart within tight range as last resort
 local function findBestSeat(nearPos)
     local folder = workspace:FindFirstChild("machinesFolder")
     if not folder then return nil end
-
-    local bestSeat = nil
+    local bestPart = nil
     local bestDist = math.huge
 
+    -- Pass 1: real Seat / VehicleSeat
     for _, obj in ipairs(folder:GetDescendants()) do
-        -- Check actual Seat/VehicleSeat instances
-        local isSeatClass = obj:IsA("Seat") or obj:IsA("VehicleSeat")
-        -- Check BaseParts with seat-like names
-        local lname = obj.Name:lower()
-        local isSeatNamed = obj:IsA("BasePart") and (
-            lname == "seat" or lname == "interact" or lname == "trigger" or
-            lname == "clickpart" or lname == "touchpart" or lname:find("seat") or
-            lname:find("interact") or lname:find("click")
-        )
-        -- Check proximity prompts (ML uses these heavily)
-        local isPromptPart = obj:IsA("ProximityPrompt")
-
-        if isSeatClass or isSeatNamed or isPromptPart then
-            local checkPart = obj
-            if isPromptPart then
-                checkPart = obj.Parent
-                if not checkPart or not checkPart:IsA("BasePart") then continue end
-            end
-            if not checkPart:IsA("BasePart") then continue end
-
-            local dist = (checkPart.Position - nearPos).Magnitude
-            if dist < bestDist and dist < 80 then
+        if obj:IsA("Seat") or obj:IsA("VehicleSeat") then
+            local dist = (obj.Position - nearPos).Magnitude
+            if dist < bestDist and dist < 50 then
                 bestDist = dist
-                bestSeat = checkPart
+                bestPart = obj
             end
         end
     end
 
-    return bestSeat
-end
-
--- Fire interact remote with the seat part (tries multiple arg formats ML uses)
-local function fireMachineInteract(seatPart)
-    if not seatPart then return end
-    -- Try the machineInteractRemote invoke
-    pcall(function()
-        ReplicatedStorage.rEvents.machineInteractRemote:InvokeServer("useMachine", seatPart)
-    end)
-    -- Also try firing with just the part (some ML versions accept this)
-    pcall(function()
-        ReplicatedStorage.rEvents.machineInteractRemote:InvokeServer(seatPart)
-    end)
-    -- Try proximity prompt trigger if there's one on/in the part
-    pcall(function()
-        local prompt = seatPart:FindFirstChildOfClass("ProximityPrompt") or
-                       seatPart.Parent and seatPart.Parent:FindFirstChildOfClass("ProximityPrompt")
-        if prompt then
-            fireEKey()
+    -- Pass 2: named interaction / root parts
+    if bestDist > 15 then
+        for _, obj in ipairs(folder:GetDescendants()) do
+            if obj:IsA("BasePart") then
+                local n = obj.Name:lower()
+                if n:find("interact") or n:find("trigger") or n:find("prompt") or n == "root" then
+                    local dist = (obj.Position - nearPos).Magnitude
+                    if dist < bestDist and dist < 30 then
+                        bestDist = dist
+                        bestPart = obj
+                    end
+                end
+            end
         end
-    end)
+    end
+
+    -- Pass 3: machine Model PrimaryPart or first BasePart
+    if bestDist > 15 then
+        for _, model in ipairs(folder:GetChildren()) do
+            if model:IsA("Model") then
+                local ref = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
+                if ref then
+                    local dist = (ref.Position - nearPos).Magnitude
+                    if dist < bestDist and dist < 30 then
+                        bestDist = dist
+                        bestPart = ref
+                    end
+                end
+            end
+        end
+    end
+
+    -- Pass 4: any closest BasePart within tight range as last resort
+    if not bestPart then
+        for _, obj in ipairs(folder:GetDescendants()) do
+            if obj:IsA("BasePart") then
+                local dist = (obj.Position - nearPos).Magnitude
+                if dist < bestDist and dist < 20 then
+                    bestDist = dist
+                    bestPart = obj
+                end
+            end
+        end
+    end
+
+    return bestPart
 end
 
--- Check if the character is genuinely sitting (Humanoid.Sit AND SeatPart assigned)
--- This avoids the stale-true bug where Sit stays true briefly after respawn
-local function isActuallySitting(hum)
-    if not hum then return false end
-    if not hum.Sit then return false end
-    -- Extra check: SeatPart being set confirms it's a real sit
-    if hum.SeatPart ~= nil then return true end
-    -- If Sit is true but SeatPart is nil, it's likely a stale state — treat as not sitting
-    return false
+local function fireMachineInteract(seat)
+    pcall(function()
+        local args = { [1] = "useMachine", [2] = seat }
+        ReplicatedStorage.rEvents.machineInteractRemote:InvokeServer(unpack(args))
+    end)
 end
 
 local function stopAutoGym()
@@ -401,100 +393,69 @@ local function stopAutoGym()
     states.autoGym = false
 end
 
--- Rebuilt Auto Gym loop — mirrors the reliability pattern of autoEquip:
--- Always re-fetches char/root/hum fresh each iteration, never caches them across iterations,
--- recovers instantly from respawn/death, and never gets stuck in a stale Sit state.
+-- Flat single-loop auto gym — always re-fetches char/hum/root from
+-- player.Character every tick so respawn NEVER breaks the thread.
+-- Rate-limited teleport (every 0.5 s) and interaction fire (every 0.15 s).
+-- Fires both machineInteract AND E-key for maximum seat-entry reliability.
 local function startAutoGym()
     stopAutoGym()
     if not states.selectedMap or not states.selectedGym then return end
     states.autoGym = true
 
+    local lastTpTime   = 0
+    local lastFireTime = 0
+    local TP_CD        = 0.5   -- seconds between teleport-to-gym attempts
+    local FIRE_CD      = 0.15  -- seconds between interaction fire attempts
+
     states.autoGymThread = task.spawn(function()
-        -- Track which sit cycle we're in so we can detect "rep done" via SeatPart going nil
-        local wasActuallySitting = false
-        local sitAttemptStart = 0
-        local SIT_TIMEOUT = 8 -- seconds before we assume seat interaction failed and retry teleport
-
-        while states.autoGym do
-            task.wait() -- yield every frame, like autoEquip does
-
+        while states.autoGym and states.selectedMap and states.selectedGym do
+            task.wait()  -- yield first — also acts as the "idle while sitting" wait
             if states.stopEverything then continue end
-            if not states.selectedMap or not states.selectedGym then break end
 
-            -- Always validate gym data fresh
             local mapData = gymData[states.selectedMap]
-            if not mapData then break end
+            if not mapData then continue end
             local gym = mapData[states.selectedGym]
-            if not gym then break end
+            if not gym then continue end
 
-            -- Strength gate
+            -- Cost / Muscle-King gate
             if gym.cost and getStrength() < gym.cost then continue end
-
-            -- Muscle King island permission gate
             if states.selectedMap == "Muscle King Island" then
                 if not isLocalPlayerMuscleKing() and not isMuscleKingNone() then continue end
             end
 
-            -- Fresh character fetch every frame — key to never going stale after respawn
-            local char, root, hum = getCharParts()
-            if not char or not root or not hum then
-                wasActuallySitting = false
-                sitAttemptStart = 0
-                continue
-            end
+            -- ALWAYS re-fetch from player.Character so respawn never leaves
+            -- us holding a destroyed Humanoid reference
+            local char = player.Character
+            if not char then continue end
+            local root = char:FindFirstChild("HumanoidRootPart")
+            local hum  = char:FindFirstChild("Humanoid")
+            if not root or not hum or hum.Health <= 0 then continue end
 
-            local currentlySitting = isActuallySitting(hum)
+            -- Already in the machine — nothing to do this tick
+            if hum.Sit then continue end
 
-            if currentlySitting then
-                -- We are in a valid sit — just wait for the rep to finish (SeatPart goes nil)
-                wasActuallySitting = true
-                sitAttemptStart = 0
-                continue
-            end
+            -- Not sitting: teleport close then fire interaction (rate-limited)
+            local now = tick()
 
-            -- Not sitting. If we WERE sitting last frame, the rep just finished — immediately loop back.
-            wasActuallySitting = false
-
-            -- Check if we've been trying to sit for too long (stuck state) → re-teleport
-            if sitAttemptStart > 0 and (os.clock() - sitAttemptStart) > SIT_TIMEOUT then
-                sitAttemptStart = 0
-                -- Force re-teleport to unstick
+            if now - lastTpTime >= TP_CD then
                 pcall(function()
                     root.CFrame = CFrame.new(gym.pos + Vector3.new(0, 4, 0))
                     root.AssemblyLinearVelocity = Vector3.zero
                 end)
-                task.wait(0.15)
-                continue
+                lastTpTime = now
             end
 
-            -- If we haven't started a sit attempt yet, teleport to the gym first
-            if sitAttemptStart == 0 then
-                pcall(function()
-                    root.CFrame = CFrame.new(gym.pos + Vector3.new(0, 4, 0))
-                    root.AssemblyLinearVelocity = Vector3.zero
-                end)
-                task.wait(0.15)
-                sitAttemptStart = os.clock()
-                continue
-            end
-
-            -- We are in a sit-attempt window — try to interact
-            local seat = findBestSeat(gym.pos)
-            if seat then
-                fireMachineInteract(seat)
-            else
+            if now - lastFireTime >= FIRE_CD then
+                -- Fire both methods — machineInteract for the remote path,
+                -- E-key for ProximityPrompt / default Roblox seat path
+                local seat = findBestSeat(gym.pos)
+                if seat then
+                    fireMachineInteract(seat)
+                end
                 fireEKey()
-            end
-
-            -- Re-teleport every 1.5s if still not seated (drift correction)
-            if (os.clock() - sitAttemptStart) % 1.5 < 0.02 then
-                pcall(function()
-                    root.CFrame = CFrame.new(gym.pos + Vector3.new(0, 4, 0))
-                    root.AssemblyLinearVelocity = Vector3.zero
-                end)
+                lastFireTime = now
             end
         end
-
         states.autoGym = false
     end)
 end
@@ -571,7 +532,7 @@ local TitleText = Instance.new("TextLabel", TitleBar)
 TitleText.Size = UDim2.new(1, -10, 1, 0)
 TitleText.Position = UDim2.fromOffset(5, 0)
 TitleText.BackgroundTransparency = 1
-TitleText.Text = "MUSCLE LEGENDS"
+TitleText.Text = "ML Hub"
 TitleText.TextColor3 = Color3.new(1, 1, 1)
 TitleText.TextXAlignment = Enum.TextXAlignment.Left
 
@@ -1436,7 +1397,7 @@ dropdownHeaderSetters["selectGym"] = gymDD
 local gymBtn = Instance.new("TextButton", f5)
 gymBtn.Size = UDim2.new(1, -10, 0, 35)
 gymBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
-gymBtn.Text = "Gym (One Shot)"
+gymBtn.Text = "Gym"
 gymBtn.TextColor3 = Color3.new(1, 1, 1)
 gymBtn.MouseButton1Click:Connect(function()
     if not states.selectedMap or not states.selectedGym then return end
@@ -1447,32 +1408,23 @@ gymBtn.MouseButton1Click:Connect(function()
     if states.selectedMap == "Muscle King Island" then
         if not isLocalPlayerMuscleKing() and not isMuscleKingNone() then return end
     end
-    local char, root, hum = getCharParts()
-    if not char then return end
-    if isActuallySitting(hum) then return end
+    local chr = player.Character
+    if not chr or not chr:FindFirstChild("HumanoidRootPart") then return end
+    local hum = chr:FindFirstChild("Humanoid")
+    if hum and hum.Sit then return end
     
-    root.CFrame = CFrame.new(gym.pos + Vector3.new(0, 4, 0))
-    root.AssemblyLinearVelocity = Vector3.zero
+    chr.HumanoidRootPart.CFrame = CFrame.new(gym.pos + Vector3.new(0, 4, 0))
+    chr.HumanoidRootPart.AssemblyLinearVelocity = Vector3.zero
     
     task.spawn(function()
-        task.wait(0.15)
-        local attempts = 0
-        while hum and not isActuallySitting(hum) and attempts < 30 do
+        while hum and not hum.Sit do
             if states.stopEverything then break end
             local seat = findBestSeat(gym.pos)
             if seat then
                 fireMachineInteract(seat)
-            else
-                fireEKey()
             end
-            task.wait(0.2)
-            attempts = attempts + 1
-            if attempts % 5 == 0 then
-                local _, r2, _ = getCharParts()
-                if r2 then
-                    r2.CFrame = CFrame.new(gym.pos + Vector3.new(0, 4, 0))
-                end
-            end
+            fireEKey()
+            task.wait()
         end
     end)
 end)
@@ -1486,32 +1438,6 @@ local autoGymBtn = createToggle(f5, "Auto Gym", "autoGym", function(val)
     end
     return val
 end)
-
--- Status label so the user can see what auto gym is doing
-local gymStatusLabel = Instance.new("TextLabel", f5)
-gymStatusLabel.Size = UDim2.new(1, -10, 0, 20)
-gymStatusLabel.BackgroundTransparency = 1
-gymStatusLabel.TextColor3 = Color3.fromRGB(150, 255, 150)
-gymStatusLabel.Font = Enum.Font.Gotham
-gymStatusLabel.TextSize = 11
-gymStatusLabel.Text = "Auto Gym: Idle"
-gymStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-
--- Update the status label every frame based on gym state
-table.insert(getgenv().ML_Expert_Loops, RunService.Heartbeat:Connect(function()
-    if not states.autoGym then
-        gymStatusLabel.Text = "Auto Gym: OFF"
-        return
-    end
-    local _, _, hum = getCharParts()
-    if not hum then
-        gymStatusLabel.Text = "Auto Gym: Waiting for respawn..."
-    elseif isActuallySitting(hum) then
-        gymStatusLabel.Text = "Auto Gym: Repping ✓"
-    else
-        gymStatusLabel.Text = "Auto Gym: Teleporting / Sitting..."
-    end
-end))
 
 ----------------------------------------------------------------
 -- TAB 6: AUTO CRYSTAL
@@ -1700,10 +1626,15 @@ local function createCrystalSection(parent, title, list, stateKeyData, stateKeyN
     buy5EvolveBtn.MouseButton1Click:Connect(function()
         local data = states[stateKeyData]
         if not data then return end
-        for _ = 1, 5 do
-            fireBuyCrystal(data)
+        -- Fire 5 times instantly, no loop, then immediately evolve
+        local function buy5Instantly(d)
+            fireBuyCrystal(d)
+            fireBuyCrystal(d)
+            fireBuyCrystal(d)
+            fireBuyCrystal(d)
+            fireBuyCrystal(d)
         end
-        task.wait(0.5)
+        buy5Instantly(data)
         evolveByName(data.name)
         infoLabel.Text = "Bought 5 and evolved " .. data.name
     end)
@@ -1838,7 +1769,7 @@ end)
 local calcPetExpBtn = Instance.new("TextButton", f7)
 calcPetExpBtn.Size = UDim2.new(1, -10, 0, 35)
 calcPetExpBtn.BackgroundColor3 = Color3.fromRGB(40, 80, 140)
-calcPetExpBtn.Text = "Calculate PET EXP – EXP GIVES"
+calcPetExpBtn.Text = "Calculate PET EXP - EXP GIVES"
 calcPetExpBtn.TextColor3 = Color3.new(1, 1, 1)
 calcPetExpBtn.MouseButton1Click:Connect(function()
     if not selectedGlitchRock then return end
@@ -1898,10 +1829,19 @@ calcBtn.MouseButton1Click:Connect(function()
     end)
     if success then
         calcResultLabel.Text = "Result: " .. tostring(result)
-        calcInput.Text = ""
     else
         calcResultLabel.Text = "Result: Invalid expression"
     end
+end)
+
+local clearCalcBtn = Instance.new("TextButton", f8)
+clearCalcBtn.Size = UDim2.new(1, -10, 0, 35)
+clearCalcBtn.BackgroundColor3 = Color3.fromRGB(90, 40, 40)
+clearCalcBtn.Text = "Clear Text"
+clearCalcBtn.TextColor3 = Color3.new(1, 1, 1)
+clearCalcBtn.MouseButton1Click:Connect(function()
+    calcInput.Text = ""
+    calcResultLabel.Text = "Result: "
 end)
 
 ----------------------------------------------------------------
