@@ -17,6 +17,9 @@ local player = Players.LocalPlayer
 
 local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 
+----------------------------------------------------------------
+-- FILE SAVE (DISCONNECT & CONFIG)
+----------------------------------------------------------------
 local Config = { SizeValue = "1", RebirthTarget = "0", WalkSpeed = "16", FlySpeed = "50" }
 
 local function SaveConfig()
@@ -46,6 +49,9 @@ game:GetService("GuiService").ErrorMessageChanged:Connect(function(msg)
     end
 end)
 
+----------------------------------------------------------------
+-- STATE VARIABLES
+----------------------------------------------------------------
 local states = {
     selectedRock = nil, selectedMethod = nil, autoGlitch = false, autoGlitchTrain = false,
     glitchStartTime = 0, glitchAccumulated = 0, preGlitchPos = nil, isTransitioning = false,
@@ -65,11 +71,7 @@ local states = {
     autoAuraBuy = false, autoAuraBuyThread = nil,
     autoUnequipBoosts = false,
     stopEverything = false,
-    walkOnWater = true,
-    petNewItems = {}, auraNewItems = {},
-    petItemData = {}, auraItemData = {},
-    petChangeTimestamps = {}, auraChangeTimestamps = {},
-    petConnections = {}, auraConnections = {}
+    walkOnWater = true
 }
 
 local rockCache = {}
@@ -166,6 +168,9 @@ local gymData = {
     }
 }
 
+----------------------------------------------------------------
+-- UTILITIES
+----------------------------------------------------------------
 local function getRockInstance(configName)
     local data = rockData[configName]
     if not data then return nil end
@@ -299,12 +304,17 @@ local function getStrength()
     return player.leaderstats and player.leaderstats:FindFirstChild("Strength") and player.leaderstats.Strength.Value or 0
 end
 
+-- ================================================================
+-- AUTO GYM SECTION (IMPROVED)
+-- ================================================================
+
 local function findBestSeat(nearPos)
     local folder = workspace:FindFirstChild("machinesFolder")
     if not folder then return nil end
     local bestPart = nil
     local bestDist = math.huge
 
+    -- Pass 1: real Seat / VehicleSeat
     for _, obj in ipairs(folder:GetDescendants()) do
         if obj:IsA("Seat") or obj:IsA("VehicleSeat") then
             local dist = (obj.Position - nearPos).Magnitude
@@ -315,6 +325,7 @@ local function findBestSeat(nearPos)
         end
     end
 
+    -- Pass 2: named interaction / root parts
     if bestDist > 15 then
         for _, obj in ipairs(folder:GetDescendants()) do
             if obj:IsA("BasePart") then
@@ -330,6 +341,7 @@ local function findBestSeat(nearPos)
         end
     end
 
+    -- Pass 3: machine Model PrimaryPart or first BasePart
     if bestDist > 15 then
         for _, model in ipairs(folder:GetChildren()) do
             if model:IsA("Model") then
@@ -345,6 +357,7 @@ local function findBestSeat(nearPos)
         end
     end
 
+    -- Pass 4: any closest BasePart within tight range as last resort
     if not bestPart then
         for _, obj in ipairs(folder:GetDescendants()) do
             if obj:IsA("BasePart") then
@@ -406,10 +419,13 @@ local function startAutoGym()
             local hum  = char:FindFirstChild("Humanoid")
             if not root or not hum or hum.Health <= 0 then continue end
 
-            if hum.Sit then continue end
+            if hum.Sit then 
+                -- Already seated, just wait
+                task.wait(0.5)
+                continue
+            end
 
             local now = tick()
-
             if now - lastTpTime >= TP_CD then
                 pcall(function()
                     root.CFrame = CFrame.new(gym.pos + Vector3.new(0, 4, 0))
@@ -426,6 +442,7 @@ local function startAutoGym()
                 fireEKey()
                 lastFireTime = now
             end
+            task.wait()
         end
         states.autoGym = false
     end)
@@ -480,235 +497,9 @@ local function startAutoAuraBuy()
     end)
 end
 
-local function disconnectInventoryListeners(targetName)
-    if states.petConnections[targetName] then
-        for _, conn in ipairs(states.petConnections[targetName]) do
-            conn:Disconnect()
-        end
-        states.petConnections[targetName] = nil
-    end
-    if states.auraConnections[targetName] then
-        for _, conn in ipairs(states.auraConnections[targetName]) do
-            conn:Disconnect()
-        end
-        states.auraConnections[targetName] = nil
-    end
-end
-
-local function connectInventoryListeners(targetPlayer)
-    local name = targetPlayer.Name
-    disconnectInventoryListeners(name)
-
-    local petConns = {}
-    local auraConns = {}
-
-    local petsFolder = targetPlayer:FindFirstChild("petsFolder")
-    if petsFolder then
-        for _, folderName in ipairs({"Basic", "Advanced", "Rare", "Epic", "Unique"}) do
-            local folder = petsFolder:FindFirstChild(folderName)
-            if folder then
-                local conn = folder.ChildAdded:Connect(function(child)
-                    states.petNewItems[name] = states.petNewItems[name] or {}
-                    states.petNewItems[name][child] = true
-                end)
-                table.insert(petConns, conn)
-            end
-        end
-    end
-
-    local powerUpsFolder = targetPlayer:FindFirstChild("powerUpsFolder")
-    if powerUpsFolder then
-        for _, folderName in ipairs({"Basic", "Advanced", "Rare", "Epic", "Unique"}) do
-            local folder = powerUpsFolder:FindFirstChild(folderName)
-            if folder then
-                local conn = folder.ChildAdded:Connect(function(child)
-                    states.auraNewItems[name] = states.auraNewItems[name] or {}
-                    states.auraNewItems[name][child] = true
-                end)
-                table.insert(auraConns, conn)
-            end
-        end
-    end
-
-    states.petConnections[name] = petConns
-    states.auraConnections[name] = auraConns
-end
-
-local function generatePetOptions(folder, playerName, folderName)
-    if not folder then return {"Nothing Here"}, {} end
-    local seenNew = states.petNewItems[playerName] or {}
-    local changeTimestamps = states.petChangeTimestamps[playerName] or {}
-    local options = {}
-    local refs = {}
-    local counts = {}
-    for _, item in ipairs(folder:GetChildren()) do
-        local baseName = item.Name
-        counts[baseName] = (counts[baseName] or 0) + 1
-        local displayBase = baseName .. " #" .. counts[baseName]
-        local suffix = ""
-        if seenNew[item] then
-            suffix = suffix .. " (NEW)"
-        end
-        local ts = changeTimestamps[item]
-        if ts and os.time() - ts <= 2 then
-            suffix = suffix .. " (CHANGED)"
-        end
-        local displayName = displayBase .. suffix
-        table.insert(options, displayName)
-        refs[displayName] = item
-    end
-    if #options == 0 then return {"Nothing Here"}, {} end
-    return options, refs
-end
-
-local function generateAuraOptions(folder, playerName, folderName)
-    if not folder then return {"Nothing Here"}, {} end
-    local seenNew = states.auraNewItems[playerName] or {}
-    local changeTimestamps = states.auraChangeTimestamps[playerName] or {}
-    local options = {}
-    local refs = {}
-    local counts = {}
-    for _, item in ipairs(folder:GetChildren()) do
-        local baseName = item.Name
-        counts[baseName] = (counts[baseName] or 0) + 1
-        local displayBase = baseName .. " #" .. counts[baseName]
-        local suffix = ""
-        if seenNew[item] then
-            suffix = suffix .. " (NEW)"
-        end
-        local ts = changeTimestamps[item]
-        if ts and os.time() - ts <= 2 then
-            suffix = suffix .. " (CHANGED)"
-        end
-        local displayName = displayBase .. suffix
-        table.insert(options, displayName)
-        refs[displayName] = item
-    end
-    if #options == 0 then return {"Nothing Here"}, {} end
-    return options, refs
-end
-
-local function updateItemDataAndDetectChanges(item, playerName, isPet)
-    local dataTable = isPet and states.petItemData[playerName] or states.auraItemData[playerName]
-    local changeTable = isPet and states.petChangeTimestamps[playerName] or states.auraChangeTimestamps[playerName]
-    dataTable = dataTable or {}
-    changeTable = changeTable or {}
-    if isPet then
-        states.petItemData[playerName] = dataTable
-        states.petChangeTimestamps[playerName] = changeTable
-    else
-        states.auraItemData[playerName] = dataTable
-        states.auraChangeTimestamps[playerName] = changeTable
-    end
-
-    local exp = item:FindFirstChild("exp") and item.exp.Value or 0
-    local level = item:FindFirstChild("level") and item.level.Value or 1
-    local evolved = false
-    local evObj = item:FindFirstChild("Evolved") or item:FindFirstChild("evolved")
-    if evObj and evObj:IsA("BoolValue") then evolved = evObj.Value end
-
-    local oldData = dataTable[item]
-    if oldData then
-        if oldData.exp ~= exp or oldData.level ~= level or oldData.evolved ~= evolved then
-            changeTable[item] = os.time()
-        end
-    end
-    dataTable[item] = {exp = exp, level = level, evolved = evolved}
-end
-
-local function refreshInventoryDropdowns(targetPlayer)
-    local name = targetPlayer.Name
-    local petsF = targetPlayer:FindFirstChild("petsFolder")
-    for _, folderName in ipairs({"Basic", "Advanced", "Rare", "Epic", "Unique"}) do
-        local folder = petsF and petsF:FindFirstChild(folderName)
-        local options, refs = generatePetOptions(folder, name, folderName)
-        local dd = nil
-        if folderName == "Basic" then dd = basicDD
-        elseif folderName == "Advanced" then dd = advDD
-        elseif folderName == "Rare" then dd = rareDD
-        elseif folderName == "Epic" then dd = epicDD
-        elseif folderName == "Unique" then dd = uniqueDD
-        end
-        if dd then
-            local currentLabel = states.currentPetLabel
-            local currentTable = states.currentPetTable
-            local found = false
-            if currentLabel and currentTable == folderName then
-                for _, opt in ipairs(options) do
-                    if opt == currentLabel then
-                        found = true
-                        break
-                    end
-                end
-            end
-            dd.refresh(options)
-            if folderName == "Basic" then petRefsBasic = refs
-            elseif folderName == "Advanced" then petRefsAdv = refs
-            elseif folderName == "Rare" then petRefsRare = refs
-            elseif folderName == "Epic" then petRefsEpic = refs
-            elseif folderName == "Unique" then petRefsUnique = refs
-            end
-            if found and currentLabel then
-                dd.setValue(currentLabel)
-            else
-                states.currentPetLabel = nil
-                states.currentPetTable = nil
-                dd.setHeaderText(folderName .. " Pets v")
-            end
-        end
-    end
-
-    local powerUpsF = targetPlayer:FindFirstChild("powerUpsFolder")
-    for _, folderName in ipairs({"Basic", "Advanced", "Rare", "Epic", "Unique"}) do
-        local folder = powerUpsF and powerUpsF:FindFirstChild(folderName)
-        local options, refs = generateAuraOptions(folder, name, folderName)
-        local dd = nil
-        if folderName == "Basic" then dd = auraBasicDD
-        elseif folderName == "Advanced" then dd = auraAdvDD
-        elseif folderName == "Rare" then dd = auraRareDD
-        elseif folderName == "Epic" then dd = auraEpicDD
-        elseif folderName == "Unique" then dd = auraUniqueDD
-        end
-        if dd then
-            local currentLabel = states.currentAuraLabel
-            local currentTable = states.currentAuraTable
-            local found = false
-            if currentLabel and currentTable == folderName then
-                for _, opt in ipairs(options) do
-                    if opt == currentLabel then
-                        found = true
-                        break
-                    end
-                end
-            end
-            dd.refresh(options)
-            if folderName == "Basic" then auraRefsBasic = refs
-            elseif folderName == "Advanced" then auraRefsAdv = refs
-            elseif folderName == "Rare" then auraRefsRare = refs
-            elseif folderName == "Epic" then auraRefsEpic = refs
-            elseif folderName == "Unique" then auraRefsUnique = refs
-            end
-            if found and currentLabel then
-                dd.setValue(currentLabel)
-            else
-                states.currentAuraLabel = nil
-                states.currentAuraTable = nil
-                dd.setHeaderText(folderName .. " Auras v")
-            end
-        end
-    end
-end
-
-local function clearInventoryMarks(playerName)
-    states.petNewItems[playerName] = nil
-    states.auraNewItems[playerName] = nil
-    states.petItemData[playerName] = nil
-    states.auraItemData[playerName] = nil
-    states.petChangeTimestamps[playerName] = nil
-    states.auraChangeTimestamps[playerName] = nil
-    disconnectInventoryListeners(playerName)
-end
-
+----------------------------------------------------------------
+-- UI FRAMEWORK
+----------------------------------------------------------------
 local ScreenGui = Instance.new("ScreenGui", player.PlayerGui)
 ScreenGui.Name = "ML_Expert_v5"
 ScreenGui.ResetOnSpawn = false
@@ -729,7 +520,7 @@ local TitleText = Instance.new("TextLabel", TitleBar)
 TitleText.Size = UDim2.new(1, -10, 1, 0)
 TitleText.Position = UDim2.fromOffset(5, 0)
 TitleText.BackgroundTransparency = 1
-TitleText.Text = "Muscle Legends"
+TitleText.Text = "ML Hub"
 TitleText.TextColor3 = Color3.new(1, 1, 1)
 TitleText.TextXAlignment = Enum.TextXAlignment.Left
 
@@ -854,6 +645,9 @@ if isMobile then
     end
 end
 
+----------------------------------------------------------------
+-- UI COMPONENTS HELPER
+----------------------------------------------------------------
 local SetToggle = {}
 local function createToggle(parent, text, key, callback)
     local btn = Instance.new("TextButton", parent)
@@ -1014,6 +808,9 @@ end
 
 local lockPosBtn, autoRebirthTargetBtn, autoRebirthInfBtn, trackToggle
 
+----------------------------------------------------------------
+-- KILL VISIBILITY
+----------------------------------------------------------------
 local function updateVisibility(isInvisible) end
 local function checkResetKillAttackTime()
     if not states.killActive and not states.killEveryone and not states.autoGoodKarma and not states.autoEvilKarma then
@@ -1022,6 +819,9 @@ local function checkResetKillAttackTime()
     end
 end
 
+----------------------------------------------------------------
+-- TAB 1: AUTO FARM
+----------------------------------------------------------------
 local f1 = frames["Auto Farm"]
 
 local selectRockDD = createDropdown(f1, "Select Rock", {"Tiny Rock", "Punching Rock", "Large Rock", "Golden Rock", "Frozen Rock", "Mystic Rock", "Inferno Rock", "Legend Rock", "Muscle King Rock", "Jungle Rock"}, false, function(v) 
@@ -1215,6 +1015,9 @@ createToggle(f1, "Accelerate Rep Speed", "accelReps", function(val)
 end)
 createToggle(f1, "Fast Punch", "fastPunch", function(val) states.fastPunch = val; local p = getPunch(); if p and p:FindFirstChild("attackTime") then p.attackTime.Value = val and 0 or 0.35 end end)
 
+----------------------------------------------------------------
+-- TAB 2: FARM
+----------------------------------------------------------------
 local f2 = frames["Farm"]
 createToggle(f2, "Less Lag", "lessLag", function(val) states.lessLag = val end)
 
@@ -1346,6 +1149,9 @@ openAllChestsBtn.MouseButton1Click:Connect(function()
     end
 end)
 
+----------------------------------------------------------------
+-- TAB 3: KILLER
+----------------------------------------------------------------
 local f3 = frames["Killer"]
 local pKillDD = createDropdown(f3, "Player Dropdown", {}, true, function(label) local realName = nameMap[label] or label; if states.killTargets[realName] then states.killTargets[realName] = nil; return false else states.killTargets[realName] = true; return true end end, function(label) local r = nameMap[label] or label; return states.killTargets[r] end)
 local whiteDD = createDropdown(f3, "Whitelist Dropdown", {}, true, function(label) local realName = nameMap[label] or label; if states.whitelist[realName] then states.whitelist[realName] = nil; return false else states.whitelist[realName] = true; return true end end, function(label) local r = nameMap[label] or label; return states.whitelist[r] end)
@@ -1356,18 +1162,194 @@ createToggle(f3, "Kill Everyone", nil, function(v) states.killEveryone = v; if v
 createToggle(f3, "Auto Good Karma", nil, function(v) states.autoGoodKarma = v; if v then updateVisibility(true) else checkResetKillAttackTime() end end)
 createToggle(f3, "Auto Evil Karma", nil, function(v) states.autoEvilKarma = v; if v then updateVisibility(true) else checkResetKillAttackTime() end end)
 
+----------------------------------------------------------------
+-- TAB 4: STATS & INVENTORY (with Live Update Pet/Aura)
+----------------------------------------------------------------
 local f4 = frames["Stats"]
 local statsPlayerDD
 local basicDD, advDD, rareDD, epicDD, uniqueDD
 local auraBasicDD, auraAdvDD, auraRareDD, auraEpicDD, auraUniqueDD
 local petDetails, auraDetails
 
-local petRefsBasic, petRefsAdv, petRefsRare, petRefsEpic, petRefsUnique = {}, {}, {}, {}, {}
-local auraRefsBasic, auraRefsAdv, auraRefsRare, auraRefsEpic, auraRefsUnique = {}, {}, {}, {}, {}
+-- Live update tracking
+local lastPetSnapshot = {}   -- [rarity][displayName] = {item, hash}
+local lastAuraSnapshot = {}
+local pendingChangedMarks = {} -- { ["displayName"] = expiryTime }
+local lastSelectedPlayer = nil
+
+local function getItemHash(item)
+    local exp = item:FindFirstChild("exp") and item.exp.Value or 0
+    local level = item:FindFirstChild("level") and item.level.Value or 0
+    local perks = item:FindFirstChild("perksFolder")
+    local strength = perks and perks:FindFirstChild("strength") and (perks.strength:IsA("ValueBase") and perks.strength.Value or (perks.strength:FindFirstChild("Value") and perks.strength.Value.Value) or 0) or 0
+    local durability = perks and perks:FindFirstChild("durability") and (perks.durability:IsA("ValueBase") and perks.durability.Value or (perks.durability:FindFirstChild("Value") and perks.durability.Value.Value) or 0) or 0
+    local agility = perks and perks:FindFirstChild("agility") and (perks.agility:IsA("ValueBase") and perks.agility.Value or (perks.agility:FindFirstChild("Value") and perks.agility.Value.Value) or 0) or 0
+    local damage = perks and perks:FindFirstChild("damage") and (perks.damage:IsA("ValueBase") and perks.damage.Value or (perks.damage:FindFirstChild("Value") and perks.damage.Value.Value) or 0) or 0
+    return string.format("%d|%d|%d|%d|%d|%d", exp, level, strength, durability, agility, damage)
+end
+
+local function refreshPetDropdownsWithMarks()
+    if not statsPlayerDD then return end
+    local tp = states.statsTarget and Players:FindFirstChild(states.statsTarget)
+    if not tp then
+        clearPetAuraUI()
+        return
+    end
+    local function getOptionsWithMarks(folder, snapshotTable, refTable, isPet)
+        local options = {}
+        if not folder then return {"Nothing Here"} end
+        local items = {}
+        for _, item in ipairs(folder:GetChildren()) do
+            local baseName = item.Name
+            local count = 0
+            for _, other in ipairs(folder:GetChildren()) do
+                if other.Name == baseName then count = count + 1 end
+            end
+            local display = baseName .. " #" .. count
+            items[display] = item
+        end
+        for display, item in pairs(items) do
+            local marked = display
+            if isPet then
+                if snapshotTable and snapshotTable[display] and snapshotTable[display].isNew then
+                    marked = display .. " [NEW]"
+                elseif pendingChangedMarks[display] and pendingChangedMarks[display] > tick() then
+                    marked = display .. " [CHANGED]"
+                end
+            end
+            table.insert(options, marked)
+            refTable[marked] = item
+        end
+        if #options == 0 then return {"Nothing Here"} end
+        return options
+    end
+
+    local petsF = tp:FindFirstChild("petsFolder")
+    if petsF then
+        basicDD.refresh(getOptionsWithMarks(petsF:FindFirstChild("Basic"), lastPetSnapshot["Basic"], petRefsBasic, true))
+        advDD.refresh(getOptionsWithMarks(petsF:FindFirstChild("Advanced"), lastPetSnapshot["Advanced"], petRefsAdv, true))
+        rareDD.refresh(getOptionsWithMarks(petsF:FindFirstChild("Rare"), lastPetSnapshot["Rare"], petRefsRare, true))
+        epicDD.refresh(getOptionsWithMarks(petsF:FindFirstChild("Epic"), lastPetSnapshot["Epic"], petRefsEpic, true))
+        uniqueDD.refresh(getOptionsWithMarks(petsF:FindFirstChild("Unique"), lastPetSnapshot["Unique"], petRefsUnique, true))
+    end
+
+    local powerUpsF = tp:FindFirstChild("powerUpsFolder")
+    if powerUpsF then
+        auraBasicDD.refresh(getOptionsWithMarks(powerUpsF:FindFirstChild("Basic"), lastAuraSnapshot["Basic"], auraRefsBasic, false))
+        auraAdvDD.refresh(getOptionsWithMarks(powerUpsF:FindFirstChild("Advanced"), lastAuraSnapshot["Advanced"], auraRefsAdv, false))
+        auraRareDD.refresh(getOptionsWithMarks(powerUpsF:FindFirstChild("Rare"), lastAuraSnapshot["Rare"], auraRefsRare, false))
+        auraEpicDD.refresh(getOptionsWithMarks(powerUpsF:FindFirstChild("Epic"), lastAuraSnapshot["Epic"], auraRefsEpic, false))
+        auraUniqueDD.refresh(getOptionsWithMarks(powerUpsF:FindFirstChild("Unique"), lastAuraSnapshot["Unique"], auraRefsUnique, false))
+    end
+end
+
+local function updateLivePetAuraSnapshots()
+    local tp = states.statsTarget and Players:FindFirstChild(states.statsTarget)
+    if not tp then return end
+
+    local function processFolder(folder, rarity, isPet)
+        if not folder then return end
+        local currentItems = {}
+        for _, item in ipairs(folder:GetChildren()) do
+            local baseName = item.Name
+            local count = 0
+            for _, other in ipairs(folder:GetChildren()) do
+                if other.Name == baseName then count = count + 1 end
+            end
+            local display = baseName .. " #" .. count
+            currentItems[display] = item
+        end
+
+        local oldSnapshot = (isPet and lastPetSnapshot[rarity]) or (not isPet and lastAuraSnapshot[rarity]) or {}
+        local newSnapshot = {}
+        local changed = false
+
+        -- Detect new items
+        for display, item in pairs(currentItems) do
+            local old = oldSnapshot[display]
+            newSnapshot[display] = { item = item, hash = getItemHash(item), isNew = false }
+            if not old then
+                newSnapshot[display].isNew = true
+                changed = true
+            elseif old.hash ~= newSnapshot[display].hash then
+                -- Value changed, mark as CHANGED for 2 seconds
+                pendingChangedMarks[display] = tick() + 2
+                changed = true
+            end
+        end
+        -- Detect removed items -> clear pending marks
+        for display, _ in pairs(oldSnapshot) do
+            if not currentItems[display] then
+                pendingChangedMarks[display] = nil
+                changed = true
+            end
+        end
+
+        if isPet then lastPetSnapshot[rarity] = newSnapshot
+        else lastAuraSnapshot[rarity] = newSnapshot end
+
+        if changed then
+            refreshPetDropdownsWithMarks()
+        end
+    end
+
+    local petsF = tp:FindFirstChild("petsFolder")
+    if petsF then
+        processFolder(petsF:FindFirstChild("Basic"), "Basic", true)
+        processFolder(petsF:FindFirstChild("Advanced"), "Advanced", true)
+        processFolder(petsF:FindFirstChild("Rare"), "Rare", true)
+        processFolder(petsF:FindFirstChild("Epic"), "Epic", true)
+        processFolder(petsF:FindFirstChild("Unique"), "Unique", true)
+    end
+
+    local powerUpsF = tp:FindFirstChild("powerUpsFolder")
+    if powerUpsF then
+        processFolder(powerUpsF:FindFirstChild("Basic"), "Basic", false)
+        processFolder(powerUpsF:FindFirstChild("Advanced"), "Advanced", false)
+        processFolder(powerUpsF:FindFirstChild("Rare"), "Rare", false)
+        processFolder(powerUpsF:FindFirstChild("Epic"), "Epic", false)
+        processFolder(powerUpsF:FindFirstChild("Unique"), "Unique", false)
+    end
+
+    -- Remove expired CHANGED marks every second
+    task.spawn(function()
+        while states.trackStats and states.statsTarget == tp.Name do
+            task.wait(1)
+            local now = tick()
+            local anyExpired = false
+            for k, v in pairs(pendingChangedMarks) do
+                if v <= now then
+                    pendingChangedMarks[k] = nil
+                    anyExpired = true
+                end
+            end
+            if anyExpired then
+                refreshPetDropdownsWithMarks()
+            end
+        end
+    end)
+end
+
+local function processSpecificFolderItems(folder)
+    if not folder then return {"Nothing Here"}, {} end;
+    local counts, itemRefs, found = {}, {}, false; 
+    local options = {};
+    for _, item in ipairs(folder:GetChildren()) do 
+        found = true;
+        local baseName = item.Name
+        counts[baseName] = (counts[baseName] or 0) + 1;
+        local displayName = baseName .. " #" .. counts[baseName]
+        table.insert(options, displayName)
+        itemRefs[displayName] = item 
+    end;
+    if not found then return {"Nothing Here"}, {} end; 
+    return options, itemRefs
+end
 
 local function handleItemSelection(label, refTable, detailLabel)
     if not label or label == "Nothing Here" then return end;
-    local item = refTable[label] 
+    local cleanLabel = label:gsub(" %[.*%]", "")
+    local item = refTable[cleanLabel] or refTable[label]
     if item then
         local isEvolved = false
         local evObj = item:FindFirstChild("Evolved") or item:FindFirstChild("evolved")
@@ -1382,9 +1364,18 @@ local function handleItemSelection(label, refTable, detailLabel)
     end
 end
 
+local function processAuraItems(folder)
+    if not folder then return {"Nothing Here"}, {} end;
+    local counts, itemRefs, found = {}, {}, false; local options = {};
+    for _, item in ipairs(folder:GetChildren()) do found = true; local baseName = item.Name; counts[baseName] = (counts[baseName] or 0) + 1;
+    local displayName = baseName .. " #" .. counts[baseName]; table.insert(options, displayName); itemRefs[displayName] = item end;
+    if not found then return {"Nothing Here"}, {} end; return options, itemRefs
+end
+
 local function handleAuraSelection(label, refTable, detailLabel)
     if not label or label == "Nothing Here" then return end;
-    local item = refTable[label]
+    local cleanLabel = label:gsub(" %[.*%]", "")
+    local item = refTable[cleanLabel] or refTable[label]
     if item then
         local isEvolved = false
         local evObj = item:FindFirstChild("Evolved") or item:FindFirstChild("evolved")
@@ -1422,20 +1413,25 @@ end
 local function resetStatsUI()
     states.trackStats = false; states.statsTarget = nil; lastStatValues = {};
     statGains = {}; statGainTimes = {}
+    lastPetSnapshot = {}
+    lastAuraSnapshot = {}
+    pendingChangedMarks = {}
     if statsPlayerDD then statsPlayerDD.setHeaderText("Player Dropdown v") end
     if trackToggle then SetToggle[trackToggle](false) end
     clearPetAuraUI()
-    if states.statsTarget then disconnectInventoryListeners(states.statsTarget) end
 end
+
+local petRefsBasic, petRefsAdv, petRefsRare, petRefsEpic, petRefsUnique = {}, {}, {}, {}, {}
+local auraRefsBasic, auraRefsAdv, auraRefsRare, auraRefsEpic, auraRefsUnique = {}, {}, {}, {}, {}
 
 statsPlayerDD = createDropdown(f4, "Player Dropdown", {}, false, function(label) 
     local newTarget = nameMap[label] or label
     if states.statsTarget ~= newTarget then 
-        if states.statsTarget then
-            clearInventoryMarks(states.statsTarget)
-        end
         states.statsTarget = newTarget
         lastStatValues = {}; statGains = {}; statGainTimes = {}
+        lastPetSnapshot = {}
+        lastAuraSnapshot = {}
+        pendingChangedMarks = {}
         statsPlayerDD.setHeaderText(label .. " v")
         states.trackStats = false
         if trackToggle then SetToggle[trackToggle](false) end
@@ -1443,32 +1439,67 @@ statsPlayerDD = createDropdown(f4, "Player Dropdown", {}, false, function(label)
         
         local tp = Players:FindFirstChild(newTarget)
         if tp then
-            connectInventoryListeners(tp)
             local petsF = tp:FindFirstChild("petsFolder")
-            local oB, rB = generatePetOptions(petsF and petsF:FindFirstChild("Basic"), newTarget, "Basic"); petRefsBasic = rB; basicDD.refresh(oB)
-            local oA, rA = generatePetOptions(petsF and petsF:FindFirstChild("Advanced"), newTarget, "Advanced"); petRefsAdv = rA; advDD.refresh(oA)
-            local oR, rR = generatePetOptions(petsF and petsF:FindFirstChild("Rare"), newTarget, "Rare"); petRefsRare = rR; rareDD.refresh(oR)
-            local oE, rE = generatePetOptions(petsF and petsF:FindFirstChild("Epic"), newTarget, "Epic"); petRefsEpic = rE; epicDD.refresh(oE)
-            local oU, rU = generatePetOptions(petsF and petsF:FindFirstChild("Unique"), newTarget, "Unique"); petRefsUnique = rU; uniqueDD.refresh(oU)
+            local oB, rB = processSpecificFolderItems(petsF and petsF:FindFirstChild("Basic")); petRefsBasic = rB; basicDD.refresh(oB)
+            local oA, rA = processSpecificFolderItems(petsF and petsF:FindFirstChild("Advanced")); petRefsAdv = rA; advDD.refresh(oA)
+            local oR, rR = processSpecificFolderItems(petsF and petsF:FindFirstChild("Rare")); petRefsRare = rR; rareDD.refresh(oR)
+            local oE, rE = processSpecificFolderItems(petsF and petsF:FindFirstChild("Epic")); petRefsEpic = rE; epicDD.refresh(oE)
+            local oU, rU = processSpecificFolderItems(petsF and petsF:FindFirstChild("Unique")); petRefsUnique = rU; uniqueDD.refresh(oU)
             
             local powerUpsF = tp:FindFirstChild("powerUpsFolder")
-            local oAB, rAB = generateAuraOptions(powerUpsF and powerUpsF:FindFirstChild("Basic"), newTarget, "Basic"); auraRefsBasic = rAB; auraBasicDD.refresh(oAB)
-            local oAA, rAA = generateAuraOptions(powerUpsF and powerUpsF:FindFirstChild("Advanced"), newTarget, "Advanced"); auraRefsAdv = rAA; auraAdvDD.refresh(oAA)
-            local oAR, rAR = generateAuraOptions(powerUpsF and powerUpsF:FindFirstChild("Rare"), newTarget, "Rare"); auraRefsRare = rAR; auraRareDD.refresh(oAR)
-            local oAE, rAE = generateAuraOptions(powerUpsF and powerUpsF:FindFirstChild("Epic"), newTarget, "Epic"); auraRefsEpic = rAE; auraEpicDD.refresh(oAE)
-            local oAU, rAU = generateAuraOptions(powerUpsF and powerUpsF:FindFirstChild("Unique"), newTarget, "Unique"); auraRefsUnique = rAU; auraUniqueDD.refresh(oAU)
+            local oAB, rAB = processAuraItems(powerUpsF and powerUpsF:FindFirstChild("Basic")); auraRefsBasic = rAB; auraBasicDD.refresh(oAB)
+            local oAA, rAA = processAuraItems(powerUpsF and powerUpsF:FindFirstChild("Advanced")); auraRefsAdv = rAA; auraAdvDD.refresh(oAA)
+            local oAR, rAR = processAuraItems(powerUpsF and powerUpsF:FindFirstChild("Rare")); auraRefsRare = rAR; auraRareDD.refresh(oAR)
+            local oAE, rAE = processAuraItems(powerUpsF and powerUpsF:FindFirstChild("Epic")); auraRefsEpic = rAE; auraEpicDD.refresh(oAE)
+            local oAU, rAU = processAuraItems(powerUpsF and powerUpsF:FindFirstChild("Unique")); auraRefsUnique = rAU; auraUniqueDD.refresh(oAU)
+
+            -- initial snapshots
+            local function initSnapshot(folder, rarity, isPet)
+                if not folder then return end
+                local snap = {}
+                for _, item in ipairs(folder:GetChildren()) do
+                    local baseName = item.Name
+                    local count = 0
+                    for _, other in ipairs(folder:GetChildren()) do
+                        if other.Name == baseName then count = count + 1 end
+                    end
+                    local display = baseName .. " #" .. count
+                    snap[display] = { item = item, hash = getItemHash(item), isNew = false }
+                end
+                if isPet then lastPetSnapshot[rarity] = snap
+                else lastAuraSnapshot[rarity] = snap end
+            end
+            if petsF then
+                initSnapshot(petsF:FindFirstChild("Basic"), "Basic", true)
+                initSnapshot(petsF:FindFirstChild("Advanced"), "Advanced", true)
+                initSnapshot(petsF:FindFirstChild("Rare"), "Rare", true)
+                initSnapshot(petsF:FindFirstChild("Epic"), "Epic", true)
+                initSnapshot(petsF:FindFirstChild("Unique"), "Unique", true)
+            end
+            if powerUpsF then
+                initSnapshot(powerUpsF:FindFirstChild("Basic"), "Basic", false)
+                initSnapshot(powerUpsF:FindFirstChild("Advanced"), "Advanced", false)
+                initSnapshot(powerUpsF:FindFirstChild("Rare"), "Rare", false)
+                initSnapshot(powerUpsF:FindFirstChild("Epic"), "Epic", false)
+                initSnapshot(powerUpsF:FindFirstChild("Unique"), "Unique", false)
+            end
         end
     end 
 end)
 
-Players.PlayerRemoving:Connect(function(plr)
-    if states.statsTarget == plr.Name then
-        if states.viewing then
-            states.viewing = false
-            if toggleButtons["viewing"] then SetToggle[toggleButtons["viewing"]](false) end
-        end
+Players.PlayerRemoving:Connect(function(plr) 
+    if states.statsTarget == plr.Name then 
         resetStatsUI()
-        clearInventoryMarks(plr.Name)
+    end
+    -- Auto turn off view toggle if viewing that player
+    if states.viewing and states.statsTarget == plr.Name then
+        states.viewing = false
+        if toggleButtons["viewing"] and SetToggle[toggleButtons["viewing"]] then
+            SetToggle[toggleButtons["viewing"]](false)
+        end
+        if player.Character and player.Character:FindFirstChild("Humanoid") then
+            workspace.CurrentCamera.CameraSubject = player.Character.Humanoid
+        end
     end
 end)
 
@@ -1500,11 +1531,36 @@ petDetails = Instance.new("TextLabel", f4); petDetails.Size = UDim2.new(1, -10, 
 petDetails.TextColor3 = Color3.new(1, 1, 1); petDetails.TextXAlignment = Enum.TextXAlignment.Left; petDetails.TextYAlignment = Enum.TextYAlignment.Top;
 petDetails.Text = "Select a Pet to view stats"
 
-basicDD = createDropdown(f4, "Basic Pets", {"Nothing Here"}, false, function(l) states.currentPetLabel = l; states.currentPetTable = "Basic"; handleItemSelection(l, petRefsBasic, petDetails) end)
-advDD = createDropdown(f4, "Advance Pets", {"Nothing Here"}, false, function(l) states.currentPetLabel = l; states.currentPetTable = "Advanced"; handleItemSelection(l, petRefsAdv, petDetails) end)
-rareDD = createDropdown(f4, "Rare Pets", {"Nothing Here"}, false, function(l) states.currentPetLabel = l; states.currentPetTable = "Rare"; handleItemSelection(l, petRefsRare, petDetails) end)
-epicDD = createDropdown(f4, "Epic Pets", {"Nothing Here"}, false, function(l) states.currentPetLabel = l; states.currentPetTable = "Epic"; handleItemSelection(l, petRefsEpic, petDetails) end)
-uniqueDD = createDropdown(f4, "Unique Pets", {"Nothing Here"}, false, function(l) states.currentPetLabel = l; states.currentPetTable = "Unique"; handleItemSelection(l, petRefsUnique, petDetails) end)
+basicDD = createDropdown(f4, "Basic Pets", {"Nothing Here"}, false, function(l) 
+    local clean = l:gsub(" %[.*%]", "")
+    states.currentPetLabel = clean
+    states.currentPetTable = "Basic"
+    handleItemSelection(clean, petRefsBasic, petDetails)
+end)
+advDD = createDropdown(f4, "Advance Pets", {"Nothing Here"}, false, function(l) 
+    local clean = l:gsub(" %[.*%]", "")
+    states.currentPetLabel = clean
+    states.currentPetTable = "Advanced"
+    handleItemSelection(clean, petRefsAdv, petDetails)
+end)
+rareDD = createDropdown(f4, "Rare Pets", {"Nothing Here"}, false, function(l) 
+    local clean = l:gsub(" %[.*%]", "")
+    states.currentPetLabel = clean
+    states.currentPetTable = "Rare"
+    handleItemSelection(clean, petRefsRare, petDetails)
+end)
+epicDD = createDropdown(f4, "Epic Pets", {"Nothing Here"}, false, function(l) 
+    local clean = l:gsub(" %[.*%]", "")
+    states.currentPetLabel = clean
+    states.currentPetTable = "Epic"
+    handleItemSelection(clean, petRefsEpic, petDetails)
+end)
+uniqueDD = createDropdown(f4, "Unique Pets", {"Nothing Here"}, false, function(l) 
+    local clean = l:gsub(" %[.*%]", "")
+    states.currentPetLabel = clean
+    states.currentPetTable = "Unique"
+    handleItemSelection(clean, petRefsUnique, petDetails)
+end)
 
 local auraHeader = Instance.new("TextLabel", f4); auraHeader.Size = UDim2.new(1, -10, 0, 25); auraHeader.Text = "--- AURAS ---"; auraHeader.BackgroundTransparency = 1;
 auraHeader.TextColor3 = Color3.fromRGB(200, 0, 200); auraHeader.Font = Enum.Font.SourceSansBold; auraHeader.TextSize = 18
@@ -1513,11 +1569,36 @@ auraDetails = Instance.new("TextLabel", f4); auraDetails.Size = UDim2.new(1, -10
 auraDetails.BackgroundTransparency = 1; auraDetails.TextColor3 = Color3.new(1, 1, 1); auraDetails.TextXAlignment = Enum.TextXAlignment.Left; auraDetails.TextYAlignment = Enum.TextYAlignment.Top;
 auraDetails.Text = "Select an Aura to view stats"
 
-auraBasicDD = createDropdown(f4, "Basic Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; states.currentAuraTable = "Basic"; handleAuraSelection(l, auraRefsBasic, auraDetails) end)
-auraAdvDD = createDropdown(f4, "Advance Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; states.currentAuraTable = "Advanced"; handleAuraSelection(l, auraRefsAdv, auraDetails) end)
-auraRareDD = createDropdown(f4, "Rare Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; states.currentAuraTable = "Rare"; handleAuraSelection(l, auraRefsRare, auraDetails) end)
-auraEpicDD = createDropdown(f4, "Epic Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; states.currentAuraTable = "Epic"; handleAuraSelection(l, auraRefsEpic, auraDetails) end)
-auraUniqueDD = createDropdown(f4, "Unique Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; states.currentAuraTable = "Unique"; handleAuraSelection(l, auraRefsUnique, auraDetails) end)
+auraBasicDD = createDropdown(f4, "Basic Auras", {"Nothing Here"}, false, function(l) 
+    local clean = l:gsub(" %[.*%]", "")
+    states.currentAuraLabel = clean
+    states.currentAuraTable = "Basic"
+    handleAuraSelection(clean, auraRefsBasic, auraDetails)
+end)
+auraAdvDD = createDropdown(f4, "Advance Auras", {"Nothing Here"}, false, function(l) 
+    local clean = l:gsub(" %[.*%]", "")
+    states.currentAuraLabel = clean
+    states.currentAuraTable = "Advanced"
+    handleAuraSelection(clean, auraRefsAdv, auraDetails)
+end)
+auraRareDD = createDropdown(f4, "Rare Auras", {"Nothing Here"}, false, function(l) 
+    local clean = l:gsub(" %[.*%]", "")
+    states.currentAuraLabel = clean
+    states.currentAuraTable = "Rare"
+    handleAuraSelection(clean, auraRefsRare, auraDetails)
+end)
+auraEpicDD = createDropdown(f4, "Epic Auras", {"Nothing Here"}, false, function(l) 
+    local clean = l:gsub(" %[.*%]", "")
+    states.currentAuraLabel = clean
+    states.currentAuraTable = "Epic"
+    handleAuraSelection(clean, auraRefsEpic, auraDetails)
+end)
+auraUniqueDD = createDropdown(f4, "Unique Auras", {"Nothing Here"}, false, function(l) 
+    local clean = l:gsub(" %[.*%]", "")
+    states.currentAuraLabel = clean
+    states.currentAuraTable = "Unique"
+    handleAuraSelection(clean, auraRefsUnique, auraDetails)
+end)
 
 local ultHeader = Instance.new("TextLabel", f4); ultHeader.Size = UDim2.new(1, -10, 0, 20); ultHeader.Text = "--- ULTIMATES ---"; ultHeader.BackgroundTransparency = 1; ultHeader.TextColor3 = Color3.fromRGB(0, 200, 200); ultHeader.Font = Enum.Font.SourceSansBold; ultHeader.TextXAlignment = Enum.TextXAlignment.Left
 local ultList = Instance.new("TextLabel", f4); ultList.Size = UDim2.new(1, -10, 0, 250); ultList.BackgroundTransparency = 1; ultList.TextColor3 = Color3.new(1, 1, 1); ultList.TextXAlignment = Enum.TextXAlignment.Left; ultList.TextYAlignment = Enum.TextYAlignment.Top; ultList.Text = "None"; ultList.TextWrapped = true; ultList.AutomaticSize = Enum.AutomaticSize.Y
@@ -1525,6 +1606,9 @@ local ultList = Instance.new("TextLabel", f4); ultList.Size = UDim2.new(1, -10, 
 local gpHeader = Instance.new("TextLabel", f4); gpHeader.Size = UDim2.new(1, -10, 0, 20); gpHeader.Text = "--- GAMEPASSES ---"; gpHeader.BackgroundTransparency = 1; gpHeader.TextColor3 = Color3.fromRGB(0, 200, 100); gpHeader.Font = Enum.Font.SourceSansBold; gpHeader.TextXAlignment = Enum.TextXAlignment.Left
 local gpList = Instance.new("TextLabel", f4); gpList.Size = UDim2.new(1, -10, 0, 200); gpList.BackgroundTransparency = 1; gpList.TextColor3 = Color3.new(1, 1, 1); gpList.TextXAlignment = Enum.TextXAlignment.Left; gpList.TextYAlignment = Enum.TextYAlignment.Top; gpList.Text = "None"; gpList.TextWrapped = true; gpList.AutomaticSize = Enum.AutomaticSize.Y
 
+----------------------------------------------------------------
+-- TAB 5: AUTO GYM
+----------------------------------------------------------------
 local f5 = frames["Auto Gym"]
 
 local mapDD
@@ -1605,6 +1689,9 @@ local autoGymBtn = createToggle(f5, "Auto Gym", "autoGym", function(val)
     return val
 end)
 
+----------------------------------------------------------------
+-- TAB 6: AUTO CRYSTAL
+----------------------------------------------------------------
 local f6 = frames["Auto Crystal"]
 
 local petList = {}
@@ -1789,14 +1876,9 @@ local function createCrystalSection(parent, title, list, stateKeyData, stateKeyN
     buy5EvolveBtn.MouseButton1Click:Connect(function()
         local data = states[stateKeyData]
         if not data then return end
-        local function buy5Instantly(d)
-            fireBuyCrystal(d)
-            fireBuyCrystal(d)
-            fireBuyCrystal(d)
-            fireBuyCrystal(d)
-            fireBuyCrystal(d)
+        for _ = 1, 5 do
+            fireBuyCrystal(data)
         end
-        buy5Instantly(data)
         evolveByName(data.name)
         infoLabel.Text = "Bought 5 and evolved " .. data.name
     end)
@@ -1818,6 +1900,9 @@ end
 createCrystalSection(f6, "--- PETS ---", petList, "selectedPetCrystalData", "selectedPetCrystal", startAutoPetBuy, stopAutoPetBuy)
 createCrystalSection(f6, "--- AURAS ---", auraList, "selectedAuraCrystalData", "selectedAuraCrystal", startAutoAuraBuy, stopAutoAuraBuy)
 
+----------------------------------------------------------------
+-- TAB 7: GLITCHABLE REBIRTH
+----------------------------------------------------------------
 local f7 = frames["Glitchable Rebirth"]
 
 local glitchRockOptions = {}
@@ -1948,6 +2033,9 @@ petExpCalcLabel.Font = Enum.Font.Gotham
 petExpCalcLabel.TextSize = 12
 _G.GlitchPetExpCalcLabel = petExpCalcLabel
 
+----------------------------------------------------------------
+-- TAB 8: CALCULATOR
+----------------------------------------------------------------
 local f8 = frames["Calculator"]
 
 local calcInput = Instance.new("TextBox", f8)
@@ -2000,19 +2088,50 @@ clearCalcBtn.MouseButton1Click:Connect(function()
     calcResultLabel.Text = "Result: "
 end)
 
+----------------------------------------------------------------
+-- TAB 9: TELEPORT (with gym teleports and Legend Beach)
+----------------------------------------------------------------
 local f9 = frames["Teleport"]
+
+-- Helper to get gym position for an island (except Tiny Island)
+local function getTeleportPosForIsland(islandName)
+    if islandName == "Tiny Island" then
+        return Vector3.new(-33.693745, 7.456870, 1892.807007)
+    elseif islandName == "Muscle King Island" then
+        local gym = gymData["Muscle King Island"]["Muscle King Lift"]
+        return gym.pos
+    elseif islandName == "Jungle Island" then
+        local gym = gymData["Jungle Island"]["Jungle Bench"]
+        return gym.pos
+    elseif islandName == "Frozen Island" then
+        local gym = gymData["Frozen Island"]["Frozen Press"]
+        return gym.pos
+    elseif islandName == "Mystic Island" then
+        local gym = gymData["Mystic Island"]["Mystic Pullup"]
+        return gym.pos
+    elseif islandName == "Inferno Island" then
+        local gym = gymData["Inferno Island"]["Eternal Press"]
+        return gym.pos
+    elseif islandName == "Legends Island" then
+        local gym = gymData["Legend Island"]["Legend Lift"]
+        return gym.pos
+    else
+        -- default safe spot for Beach, etc.
+        return nil
+    end
+end
 
 local teleportList = {
     {name = "Safe Spot", pos = Vector3.new(218.565002, 41.153748, -8129.369629)},
     {name = "Tiny Island", pos = Vector3.new(-33.693745, 7.456870, 1892.807007)},
     {name = "Beach", pos = Vector3.new(4.466469, 7.303733, 132.878891)},
     {name = "Legend Beach", pos = Vector3.new(1.998896, 18.174332, -234.682587)},
-    {name = "Frozen Gym", pos = Vector3.new(-2623.022217, 7.303728, -409.073334)},
-    {name = "Mystic Gym", pos = Vector3.new(2250.778076, 7.303732, 1073.226685)},
-    {name = "Inferno Gym", pos = Vector3.new(-6758.963867, 7.303741, -1284.918701)},
-    {name = "Legend Gym", pos = Vector3.new(4603.281738, 991.481750, -3897.865723)},
-    {name = "Muscle King Gym", pos = Vector3.new(-8625.929688, 17.153761, -5730.473145)},
-    {name = "Jungle Gym", pos = Vector3.new(-8685.621094, 6.732735, 2392.326660)}
+    {name = "Frozen Island", pos = getTeleportPosForIsland("Frozen Island")},
+    {name = "Mystic Island", pos = getTeleportPosForIsland("Mystic Island")},
+    {name = "Inferno Island", pos = getTeleportPosForIsland("Inferno Island")},
+    {name = "Legends Island", pos = getTeleportPosForIsland("Legends Island")},
+    {name = "Muscle King Island", pos = getTeleportPosForIsland("Muscle King Island")},
+    {name = "Jungle Island", pos = getTeleportPosForIsland("Jungle Island")}
 }
 
 for _, tpData in ipairs(teleportList) do
@@ -2029,6 +2148,9 @@ for _, tpData in ipairs(teleportList) do
     end)
 end
 
+----------------------------------------------------------------
+-- TAB 10: CONFIG
+----------------------------------------------------------------
 local f10 = frames["Config"]
 
 local configFilePath = "ML_Expert_Configs.json"
@@ -2274,6 +2396,9 @@ removeConfigBtn.MouseButton1Click:Connect(function()
     end)
 end)
 
+----------------------------------------------------------------
+-- MAIN LOOPS
+----------------------------------------------------------------
 table.insert(getgenv().ML_Expert_Loops, RunService.Heartbeat:Connect(function()
     if states.stopEverything then return end
     if states.autoMuscleKing then
@@ -2688,65 +2813,12 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         if states.viewing and states.statsTarget then local tp = Players:FindFirstChild(states.statsTarget);
             if tp and tp.Character and tp.Character:FindFirstChild("Humanoid") then workspace.CurrentCamera.CameraSubject = tp.Character.Humanoid end elseif not states.viewing and player.Character and player.Character:FindFirstChild("Humanoid") then workspace.CurrentCamera.CameraSubject = player.Character.Humanoid end
         
-        if states.statsTarget then
-            local tp = Players:FindFirstChild(states.statsTarget)
-            if tp then
-                refreshInventoryDropdowns(tp)
-                local function updateAllItemsData(folders, isPet)
-                    for _, folderName in ipairs({"Basic", "Advanced", "Rare", "Epic", "Unique"}) do
-                        local folder = folders and folders:FindFirstChild(folderName)
-                        if folder then
-                            for _, item in ipairs(folder:GetChildren()) do
-                                updateItemDataAndDetectChanges(item, tp.Name, isPet)
-                            end
-                        end
-                    end
-                end
-                updateAllItemsData(tp:FindFirstChild("petsFolder"), true)
-                updateAllItemsData(tp:FindFirstChild("powerUpsFolder"), false)
-                
-                if states.currentPetLabel then
-                    local petRefs = nil
-                    if states.currentPetTable == "Basic" then petRefs = petRefsBasic
-                    elseif states.currentPetTable == "Advanced" then petRefs = petRefsAdv
-                    elseif states.currentPetTable == "Rare" then petRefs = petRefsRare
-                    elseif states.currentPetTable == "Epic" then petRefs = petRefsEpic
-                    elseif states.currentPetTable == "Unique" then petRefs = petRefsUnique
-                    end
-                    if petRefs then
-                        handleItemSelection(states.currentPetLabel, petRefs, petDetails)
-                    end
-                end
-                if states.currentAuraLabel then
-                    local auraRefs = nil
-                    if states.currentAuraTable == "Basic" then auraRefs = auraRefsBasic
-                    elseif states.currentAuraTable == "Advanced" then auraRefs = auraRefsAdv
-                    elseif states.currentAuraTable == "Rare" then auraRefs = auraRefsRare
-                    elseif states.currentAuraTable == "Epic" then auraRefs = auraRefsEpic
-                    elseif states.currentAuraTable == "Unique" then auraRefs = auraRefsUnique
-                    end
-                    if auraRefs then
-                        handleAuraSelection(states.currentAuraLabel, auraRefs, auraDetails)
-                    end
-                end
-                
-                local uStr, ultF = "", tp:FindFirstChild("ultimatesFolder");
-                if ultF then for _, u in ipairs(ultF:GetChildren()) do uStr = uStr .. u.Name .. ": " .. formatNum(u.Value) .. "\n" end end;
-                ultList.Text = uStr == "" and "None" or uStr
-                
-                local gpStr, opF = "", tp:FindFirstChild("ownedGamepasses")
-                if opF then for _, g in ipairs(opF:GetChildren()) do gpStr = gpStr .. g.Name .. "\n" end end
-                gpList.Text = gpStr == "" and "None" or gpStr
-            else
-                resetStatsUI()
-            end
-        else
-            for s, label in pairs(statsDisp) do label.Text = s .. ": None" end
-        end
-        
         if states.trackStats and states.statsTarget then
             local tp = Players:FindFirstChild(states.statsTarget)
             if tp then
+                -- Live update pets/auras
+                updateLivePetAuraSnapshots()
+
                 local ls = tp:FindFirstChild("leaderstats")
                 for s, label in pairs(statsDisp) do 
                     local rawVal, isBool = 0, false
@@ -2791,8 +2863,38 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                         label.Text = s .. ": " .. tostring(rawVal) 
                     end
                 end
-            end
-        end
+                
+                if states.currentPetLabel then
+                    local petList = petRefsBasic
+                    if states.currentPetTable == "Basic" then petList = petRefsBasic
+                    elseif states.currentPetTable == "Advanced" then petList = petRefsAdv
+                    elseif states.currentPetTable == "Rare" then petList = petRefsRare
+                    elseif states.currentPetTable == "Epic" then petList = petRefsEpic
+                    elseif states.currentPetTable == "Unique" then petList = petRefsUnique
+                    end
+                    handleItemSelection(states.currentPetLabel, petList, petDetails)
+                end
+                if states.currentAuraLabel then
+                    local auraList = auraRefsBasic
+                    if states.currentAuraTable == "Basic" then auraList = auraRefsBasic
+                    elseif states.currentAuraTable == "Advanced" then auraList = auraRefsAdv
+                    elseif states.currentAuraTable == "Rare" then auraList = auraRefsRare
+                    elseif states.currentAuraTable == "Epic" then auraList = auraRefsEpic
+                    elseif states.currentAuraTable == "Unique" then auraList = auraRefsUnique
+                    end
+                    handleAuraSelection(states.currentAuraLabel, auraList, auraDetails)
+                end
+                
+                local uStr, ultF = "", tp:FindFirstChild("ultimatesFolder");
+                if ultF then for _, u in ipairs(ultF:GetChildren()) do uStr = uStr .. u.Name .. ": " .. formatNum(u.Value) .. "\n" end end;
+                ultList.Text = uStr == "" and "None" or uStr
+                
+                local gpStr, opF = "", tp:FindFirstChild("ownedGamepasses")
+                if opF then for _, g in ipairs(opF:GetChildren()) do gpStr = gpStr .. g.Name .. "\n" end end
+                gpList.Text = gpStr == "" and "None" or gpStr
+                
+            else resetStatsUI() end
+        else for s, label in pairs(statsDisp) do label.Text = s .. ": None" end end
     end
 end))
 
