@@ -314,7 +314,6 @@ local function findBestSeat(nearPos)
     local bestPart = nil
     local bestDist = math.huge
 
-    -- Pass 1: real Seat / VehicleSeat
     for _, obj in ipairs(folder:GetDescendants()) do
         if obj:IsA("Seat") or obj:IsA("VehicleSeat") then
             local dist = (obj.Position - nearPos).Magnitude
@@ -325,7 +324,6 @@ local function findBestSeat(nearPos)
         end
     end
 
-    -- Pass 2: named interaction / root parts
     if bestDist > 15 then
         for _, obj in ipairs(folder:GetDescendants()) do
             if obj:IsA("BasePart") then
@@ -341,7 +339,6 @@ local function findBestSeat(nearPos)
         end
     end
 
-    -- Pass 3: machine Model PrimaryPart or first BasePart
     if bestDist > 15 then
         for _, model in ipairs(folder:GetChildren()) do
             if model:IsA("Model") then
@@ -357,7 +354,6 @@ local function findBestSeat(nearPos)
         end
     end
 
-    -- Pass 4: any closest BasePart within tight range as last resort
     if not bestPart then
         for _, obj in ipairs(folder:GetDescendants()) do
             if obj:IsA("BasePart") then
@@ -420,7 +416,6 @@ local function startAutoGym()
             if not root or not hum or hum.Health <= 0 then continue end
 
             if hum.Sit then 
-                -- Already seated, just wait
                 task.wait(0.5)
                 continue
             end
@@ -1163,7 +1158,7 @@ createToggle(f3, "Auto Good Karma", nil, function(v) states.autoGoodKarma = v; i
 createToggle(f3, "Auto Evil Karma", nil, function(v) states.autoEvilKarma = v; if v then updateVisibility(true) else checkResetKillAttackTime() end end)
 
 ----------------------------------------------------------------
--- TAB 4: STATS & INVENTORY (with Live Update Pet/Aura)
+-- TAB 4: STATS & INVENTORY (LIVE UPDATE WITH *NEW* / *CHANGED*)
 ----------------------------------------------------------------
 local f4 = frames["Stats"]
 local statsPlayerDD
@@ -1171,11 +1166,11 @@ local basicDD, advDD, rareDD, epicDD, uniqueDD
 local auraBasicDD, auraAdvDD, auraRareDD, auraEpicDD, auraUniqueDD
 local petDetails, auraDetails
 
--- Live update tracking
-local lastPetSnapshot = {}   -- [rarity][displayName] = {item, hash}
+-- Live update tracking (always active when a player is selected)
+local lastPetSnapshot = {}   -- [rarity][displayName] = {hash, isNew, changedExpiry}
 local lastAuraSnapshot = {}
 local pendingChangedMarks = {} -- { ["displayName"] = expiryTime }
-local lastSelectedPlayer = nil
+local liveUpdateThread = nil
 
 local function getItemHash(item)
     local exp = item:FindFirstChild("exp") and item.exp.Value or 0
@@ -1189,13 +1184,13 @@ local function getItemHash(item)
 end
 
 local function refreshPetDropdownsWithMarks()
-    if not statsPlayerDD then return end
     local tp = states.statsTarget and Players:FindFirstChild(states.statsTarget)
     if not tp then
         clearPetAuraUI()
         return
     end
-    local function getOptionsWithMarks(folder, snapshotTable, refTable, isPet)
+
+    local function buildOptions(folder, snapshot, isPet)
         local options = {}
         if not folder then return {"Nothing Here"} end
         local items = {}
@@ -1208,17 +1203,20 @@ local function refreshPetDropdownsWithMarks()
             local display = baseName .. " #" .. count
             items[display] = item
         end
-        for display, item in pairs(items) do
+
+        local now = tick()
+        for display, _ in pairs(items) do
             local marked = display
-            if isPet then
-                if snapshotTable and snapshotTable[display] and snapshotTable[display].isNew then
-                    marked = display .. " [NEW]"
-                elseif pendingChangedMarks[display] and pendingChangedMarks[display] > tick() then
-                    marked = display .. " [CHANGED]"
-                end
+            local isNew = snapshot and snapshot[display] and snapshot[display].isNew
+            local isChanged = pendingChangedMarks[display] and pendingChangedMarks[display] > now
+            if isNew and isChanged then
+                marked = display .. " *NEW* *CHANGED*"
+            elseif isNew then
+                marked = display .. " *NEW*"
+            elseif isChanged then
+                marked = display .. " *CHANGED*"
             end
             table.insert(options, marked)
-            refTable[marked] = item
         end
         if #options == 0 then return {"Nothing Here"} end
         return options
@@ -1226,24 +1224,24 @@ local function refreshPetDropdownsWithMarks()
 
     local petsF = tp:FindFirstChild("petsFolder")
     if petsF then
-        basicDD.refresh(getOptionsWithMarks(petsF:FindFirstChild("Basic"), lastPetSnapshot["Basic"], petRefsBasic, true))
-        advDD.refresh(getOptionsWithMarks(petsF:FindFirstChild("Advanced"), lastPetSnapshot["Advanced"], petRefsAdv, true))
-        rareDD.refresh(getOptionsWithMarks(petsF:FindFirstChild("Rare"), lastPetSnapshot["Rare"], petRefsRare, true))
-        epicDD.refresh(getOptionsWithMarks(petsF:FindFirstChild("Epic"), lastPetSnapshot["Epic"], petRefsEpic, true))
-        uniqueDD.refresh(getOptionsWithMarks(petsF:FindFirstChild("Unique"), lastPetSnapshot["Unique"], petRefsUnique, true))
+        basicDD.refresh(buildOptions(petsF:FindFirstChild("Basic"), lastPetSnapshot["Basic"], true))
+        advDD.refresh(buildOptions(petsF:FindFirstChild("Advanced"), lastPetSnapshot["Advanced"], true))
+        rareDD.refresh(buildOptions(petsF:FindFirstChild("Rare"), lastPetSnapshot["Rare"], true))
+        epicDD.refresh(buildOptions(petsF:FindFirstChild("Epic"), lastPetSnapshot["Epic"], true))
+        uniqueDD.refresh(buildOptions(petsF:FindFirstChild("Unique"), lastPetSnapshot["Unique"], true))
     end
 
     local powerUpsF = tp:FindFirstChild("powerUpsFolder")
     if powerUpsF then
-        auraBasicDD.refresh(getOptionsWithMarks(powerUpsF:FindFirstChild("Basic"), lastAuraSnapshot["Basic"], auraRefsBasic, false))
-        auraAdvDD.refresh(getOptionsWithMarks(powerUpsF:FindFirstChild("Advanced"), lastAuraSnapshot["Advanced"], auraRefsAdv, false))
-        auraRareDD.refresh(getOptionsWithMarks(powerUpsF:FindFirstChild("Rare"), lastAuraSnapshot["Rare"], auraRefsRare, false))
-        auraEpicDD.refresh(getOptionsWithMarks(powerUpsF:FindFirstChild("Epic"), lastAuraSnapshot["Epic"], auraRefsEpic, false))
-        auraUniqueDD.refresh(getOptionsWithMarks(powerUpsF:FindFirstChild("Unique"), lastAuraSnapshot["Unique"], auraRefsUnique, false))
+        auraBasicDD.refresh(buildOptions(powerUpsF:FindFirstChild("Basic"), lastAuraSnapshot["Basic"], false))
+        auraAdvDD.refresh(buildOptions(powerUpsF:FindFirstChild("Advanced"), lastAuraSnapshot["Advanced"], false))
+        auraRareDD.refresh(buildOptions(powerUpsF:FindFirstChild("Rare"), lastAuraSnapshot["Rare"], false))
+        auraEpicDD.refresh(buildOptions(powerUpsF:FindFirstChild("Epic"), lastAuraSnapshot["Epic"], false))
+        auraUniqueDD.refresh(buildOptions(powerUpsF:FindFirstChild("Unique"), lastAuraSnapshot["Unique"], false))
     end
 end
 
-local function updateLivePetAuraSnapshots()
+local function updateLiveSnapshots()
     local tp = states.statsTarget and Players:FindFirstChild(states.statsTarget)
     if not tp then return end
 
@@ -1264,20 +1262,23 @@ local function updateLivePetAuraSnapshots()
         local newSnapshot = {}
         local changed = false
 
-        -- Detect new items
+        -- New / Changed detection
         for display, item in pairs(currentItems) do
             local old = oldSnapshot[display]
-            newSnapshot[display] = { item = item, hash = getItemHash(item), isNew = false }
+            local hash = getItemHash(item)
+            local isNew = false
             if not old then
-                newSnapshot[display].isNew = true
+                isNew = true
                 changed = true
-            elseif old.hash ~= newSnapshot[display].hash then
-                -- Value changed, mark as CHANGED for 2 seconds
+            elseif old.hash ~= hash then
+                -- Mark as CHANGED for 2 seconds
                 pendingChangedMarks[display] = tick() + 2
                 changed = true
             end
+            newSnapshot[display] = { hash = hash, isNew = isNew }
         end
-        -- Detect removed items -> clear pending marks
+
+        -- Removed items: clear marks
         for display, _ in pairs(oldSnapshot) do
             if not currentItems[display] then
                 pendingChangedMarks[display] = nil
@@ -1311,23 +1312,43 @@ local function updateLivePetAuraSnapshots()
         processFolder(powerUpsF:FindFirstChild("Unique"), "Unique", false)
     end
 
-    -- Remove expired CHANGED marks every second
-    task.spawn(function()
-        while states.trackStats and states.statsTarget == tp.Name do
-            task.wait(1)
-            local now = tick()
-            local anyExpired = false
-            for k, v in pairs(pendingChangedMarks) do
-                if v <= now then
-                    pendingChangedMarks[k] = nil
-                    anyExpired = true
-                end
-            end
-            if anyExpired then
-                refreshPetDropdownsWithMarks()
-            end
+    -- Remove expired CHANGED marks
+    local now = tick()
+    local anyExpired = false
+    for k, v in pairs(pendingChangedMarks) do
+        if v <= now then
+            pendingChangedMarks[k] = nil
+            anyExpired = true
+        end
+    end
+    if anyExpired then
+        refreshPetDropdownsWithMarks()
+    end
+end
+
+-- Start the live update thread when a player is selected
+local function startLiveUpdate()
+    if liveUpdateThread then
+        pcall(task.cancel, liveUpdateThread)
+        liveUpdateThread = nil
+    end
+    if not states.statsTarget then return end
+    liveUpdateThread = task.spawn(function()
+        while states.statsTarget do
+            updateLiveSnapshots()
+            task.wait(0.5) -- check every half second
         end
     end)
+end
+
+local function stopLiveUpdate()
+    if liveUpdateThread then
+        pcall(task.cancel, liveUpdateThread)
+        liveUpdateThread = nil
+    end
+    lastPetSnapshot = {}
+    lastAuraSnapshot = {}
+    pendingChangedMarks = {}
 end
 
 local function processSpecificFolderItems(folder)
@@ -1348,7 +1369,7 @@ end
 
 local function handleItemSelection(label, refTable, detailLabel)
     if not label or label == "Nothing Here" then return end;
-    local cleanLabel = label:gsub(" %[.*%]", "")
+    local cleanLabel = label:gsub(" %*.*%*", "")  -- remove any *NEW*/*CHANGED* suffix
     local item = refTable[cleanLabel] or refTable[label]
     if item then
         local isEvolved = false
@@ -1374,7 +1395,7 @@ end
 
 local function handleAuraSelection(label, refTable, detailLabel)
     if not label or label == "Nothing Here" then return end;
-    local cleanLabel = label:gsub(" %[.*%]", "")
+    local cleanLabel = label:gsub(" %*.*%*", "")
     local item = refTable[cleanLabel] or refTable[label]
     if item then
         local isEvolved = false
@@ -1413,9 +1434,7 @@ end
 local function resetStatsUI()
     states.trackStats = false; states.statsTarget = nil; lastStatValues = {};
     statGains = {}; statGainTimes = {}
-    lastPetSnapshot = {}
-    lastAuraSnapshot = {}
-    pendingChangedMarks = {}
+    stopLiveUpdate()
     if statsPlayerDD then statsPlayerDD.setHeaderText("Player Dropdown v") end
     if trackToggle then SetToggle[trackToggle](false) end
     clearPetAuraUI()
@@ -1429,13 +1448,11 @@ statsPlayerDD = createDropdown(f4, "Player Dropdown", {}, false, function(label)
     if states.statsTarget ~= newTarget then 
         states.statsTarget = newTarget
         lastStatValues = {}; statGains = {}; statGainTimes = {}
-        lastPetSnapshot = {}
-        lastAuraSnapshot = {}
-        pendingChangedMarks = {}
         statsPlayerDD.setHeaderText(label .. " v")
         states.trackStats = false
         if trackToggle then SetToggle[trackToggle](false) end
         clearPetAuraUI()
+        stopLiveUpdate()
         
         local tp = Players:FindFirstChild(newTarget)
         if tp then
@@ -1453,36 +1470,12 @@ statsPlayerDD = createDropdown(f4, "Player Dropdown", {}, false, function(label)
             local oAE, rAE = processAuraItems(powerUpsF and powerUpsF:FindFirstChild("Epic")); auraRefsEpic = rAE; auraEpicDD.refresh(oAE)
             local oAU, rAU = processAuraItems(powerUpsF and powerUpsF:FindFirstChild("Unique")); auraRefsUnique = rAU; auraUniqueDD.refresh(oAU)
 
-            -- initial snapshots
-            local function initSnapshot(folder, rarity, isPet)
-                if not folder then return end
-                local snap = {}
-                for _, item in ipairs(folder:GetChildren()) do
-                    local baseName = item.Name
-                    local count = 0
-                    for _, other in ipairs(folder:GetChildren()) do
-                        if other.Name == baseName then count = count + 1 end
-                    end
-                    local display = baseName .. " #" .. count
-                    snap[display] = { item = item, hash = getItemHash(item), isNew = false }
-                end
-                if isPet then lastPetSnapshot[rarity] = snap
-                else lastAuraSnapshot[rarity] = snap end
-            end
-            if petsF then
-                initSnapshot(petsF:FindFirstChild("Basic"), "Basic", true)
-                initSnapshot(petsF:FindFirstChild("Advanced"), "Advanced", true)
-                initSnapshot(petsF:FindFirstChild("Rare"), "Rare", true)
-                initSnapshot(petsF:FindFirstChild("Epic"), "Epic", true)
-                initSnapshot(petsF:FindFirstChild("Unique"), "Unique", true)
-            end
-            if powerUpsF then
-                initSnapshot(powerUpsF:FindFirstChild("Basic"), "Basic", false)
-                initSnapshot(powerUpsF:FindFirstChild("Advanced"), "Advanced", false)
-                initSnapshot(powerUpsF:FindFirstChild("Rare"), "Rare", false)
-                initSnapshot(powerUpsF:FindFirstChild("Epic"), "Epic", false)
-                initSnapshot(powerUpsF:FindFirstChild("Unique"), "Unique", false)
-            end
+            -- Reset snapshot data
+            lastPetSnapshot = {}
+            lastAuraSnapshot = {}
+            pendingChangedMarks = {}
+            -- Start live update
+            startLiveUpdate()
         end
     end 
 end)
@@ -1491,7 +1484,6 @@ Players.PlayerRemoving:Connect(function(plr)
     if states.statsTarget == plr.Name then 
         resetStatsUI()
     end
-    -- Auto turn off view toggle if viewing that player
     if states.viewing and states.statsTarget == plr.Name then
         states.viewing = false
         if toggleButtons["viewing"] and SetToggle[toggleButtons["viewing"]] then
@@ -1532,31 +1524,31 @@ petDetails.TextColor3 = Color3.new(1, 1, 1); petDetails.TextXAlignment = Enum.Te
 petDetails.Text = "Select a Pet to view stats"
 
 basicDD = createDropdown(f4, "Basic Pets", {"Nothing Here"}, false, function(l) 
-    local clean = l:gsub(" %[.*%]", "")
+    local clean = l:gsub(" %*.*%*", "")
     states.currentPetLabel = clean
     states.currentPetTable = "Basic"
     handleItemSelection(clean, petRefsBasic, petDetails)
 end)
 advDD = createDropdown(f4, "Advance Pets", {"Nothing Here"}, false, function(l) 
-    local clean = l:gsub(" %[.*%]", "")
+    local clean = l:gsub(" %*.*%*", "")
     states.currentPetLabel = clean
     states.currentPetTable = "Advanced"
     handleItemSelection(clean, petRefsAdv, petDetails)
 end)
 rareDD = createDropdown(f4, "Rare Pets", {"Nothing Here"}, false, function(l) 
-    local clean = l:gsub(" %[.*%]", "")
+    local clean = l:gsub(" %*.*%*", "")
     states.currentPetLabel = clean
     states.currentPetTable = "Rare"
     handleItemSelection(clean, petRefsRare, petDetails)
 end)
 epicDD = createDropdown(f4, "Epic Pets", {"Nothing Here"}, false, function(l) 
-    local clean = l:gsub(" %[.*%]", "")
+    local clean = l:gsub(" %*.*%*", "")
     states.currentPetLabel = clean
     states.currentPetTable = "Epic"
     handleItemSelection(clean, petRefsEpic, petDetails)
 end)
 uniqueDD = createDropdown(f4, "Unique Pets", {"Nothing Here"}, false, function(l) 
-    local clean = l:gsub(" %[.*%]", "")
+    local clean = l:gsub(" %*.*%*", "")
     states.currentPetLabel = clean
     states.currentPetTable = "Unique"
     handleItemSelection(clean, petRefsUnique, petDetails)
@@ -1570,31 +1562,31 @@ auraDetails.BackgroundTransparency = 1; auraDetails.TextColor3 = Color3.new(1, 1
 auraDetails.Text = "Select an Aura to view stats"
 
 auraBasicDD = createDropdown(f4, "Basic Auras", {"Nothing Here"}, false, function(l) 
-    local clean = l:gsub(" %[.*%]", "")
+    local clean = l:gsub(" %*.*%*", "")
     states.currentAuraLabel = clean
     states.currentAuraTable = "Basic"
     handleAuraSelection(clean, auraRefsBasic, auraDetails)
 end)
 auraAdvDD = createDropdown(f4, "Advance Auras", {"Nothing Here"}, false, function(l) 
-    local clean = l:gsub(" %[.*%]", "")
+    local clean = l:gsub(" %*.*%*", "")
     states.currentAuraLabel = clean
     states.currentAuraTable = "Advanced"
     handleAuraSelection(clean, auraRefsAdv, auraDetails)
 end)
 auraRareDD = createDropdown(f4, "Rare Auras", {"Nothing Here"}, false, function(l) 
-    local clean = l:gsub(" %[.*%]", "")
+    local clean = l:gsub(" %*.*%*", "")
     states.currentAuraLabel = clean
     states.currentAuraTable = "Rare"
     handleAuraSelection(clean, auraRefsRare, auraDetails)
 end)
 auraEpicDD = createDropdown(f4, "Epic Auras", {"Nothing Here"}, false, function(l) 
-    local clean = l:gsub(" %[.*%]", "")
+    local clean = l:gsub(" %*.*%*", "")
     states.currentAuraLabel = clean
     states.currentAuraTable = "Epic"
     handleAuraSelection(clean, auraRefsEpic, auraDetails)
 end)
 auraUniqueDD = createDropdown(f4, "Unique Auras", {"Nothing Here"}, false, function(l) 
-    local clean = l:gsub(" %[.*%]", "")
+    local clean = l:gsub(" %*.*%*", "")
     states.currentAuraLabel = clean
     states.currentAuraTable = "Unique"
     handleAuraSelection(clean, auraRefsUnique, auraDetails)
@@ -2093,7 +2085,6 @@ end)
 ----------------------------------------------------------------
 local f9 = frames["Teleport"]
 
--- Helper to get gym position for an island (except Tiny Island)
 local function getTeleportPosForIsland(islandName)
     if islandName == "Tiny Island" then
         return Vector3.new(-33.693745, 7.456870, 1892.807007)
@@ -2116,7 +2107,6 @@ local function getTeleportPosForIsland(islandName)
         local gym = gymData["Legend Island"]["Legend Lift"]
         return gym.pos
     else
-        -- default safe spot for Beach, etc.
         return nil
     end
 end
@@ -2816,9 +2806,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         if states.trackStats and states.statsTarget then
             local tp = Players:FindFirstChild(states.statsTarget)
             if tp then
-                -- Live update pets/auras
-                updateLivePetAuraSnapshots()
-
+                -- stats update (trackStats only)
                 local ls = tp:FindFirstChild("leaderstats")
                 for s, label in pairs(statsDisp) do 
                     local rawVal, isBool = 0, false
