@@ -1141,11 +1141,10 @@ local petDetails, auraDetails
 
 -- Storage for item tracking (NEW / CHANGED)
 local itemMarks = {
-    pets = {},   -- key = displayName, value = "NEW" or "CHANGED"
+    pets = {},   -- key = displayName, value = { type = "NEW" or "CHANGED", timer = nil }
     auras = {}
 }
 local changedTimers = {}
-local newTimers = {}
 
 local function getItemSnapshot(item)
     local snap = {
@@ -1177,10 +1176,6 @@ local function clearMark(displayName, category)
         changedTimers[displayName]:Disconnect()
         changedTimers[displayName] = nil
     end
-    if newTimers[displayName] then
-        newTimers[displayName]:Disconnect()
-        newTimers[displayName] = nil
-    end
 end
 
 local function applyMarkToDisplayName(displayName, mark)
@@ -1189,24 +1184,25 @@ local function applyMarkToDisplayName(displayName, mark)
             return displayName .. " [NEW]"
         end
     elseif mark == "CHANGED" then
-        local clean = displayName:gsub("%s*%[[^%]]+%]%s*", "")
         if not displayName:match("%[CHANGED%]") then
+            -- remove any existing [NEW] or other marks first
+            local clean = displayName:gsub("%s*%[[^%]]+%]%s*", "")
             return clean .. " [CHANGED]"
         end
     end
     return displayName
 end
 
-local function refreshPetDropdown(category, folder, dropdownObj)
-    if not folder then return end
+local function refreshPetDropdown(category, folderRef, dropdownObj, markCategory)
+    if not folderRef then return end
     local counts = {}
     local options = {}
     local itemRefs = {}
-    for _, item in ipairs(folder:GetChildren()) do
+    for _, item in ipairs(folderRef:GetChildren()) do
         local baseName = item.Name
         counts[baseName] = (counts[baseName] or 0) + 1
         local displayName = baseName .. " #" .. counts[baseName]
-        local mark = (category == "pet" and itemMarks.pets[displayName]) or (category == "aura" and itemMarks.auras[displayName])
+        local mark = itemMarks[markCategory] and itemMarks[markCategory][displayName]
         if mark then
             displayName = applyMarkToDisplayName(displayName, mark)
         end
@@ -1215,68 +1211,42 @@ local function refreshPetDropdown(category, folder, dropdownObj)
     end
     if #options == 0 then
         options = {"Nothing Here"}
-        itemRefs = {}
     end
     dropdownObj.refresh(options)
-    -- store refs
-    if category == "pet" then
-        if folder.Name == "Basic" then petRefsBasic = itemRefs
-        elseif folder.Name == "Advanced" then petRefsAdv = itemRefs
-        elseif folder.Name == "Rare" then petRefsRare = itemRefs
-        elseif folder.Name == "Epic" then petRefsEpic = itemRefs
-        elseif folder.Name == "Unique" then petRefsUnique = itemRefs
+    -- store refs for later use
+    if markCategory == "pets" then
+        if folderRef.Name == "Basic" then petRefsBasic = itemRefs
+        elseif folderRef.Name == "Advanced" then petRefsAdv = itemRefs
+        elseif folderRef.Name == "Rare" then petRefsRare = itemRefs
+        elseif folderRef.Name == "Epic" then petRefsEpic = itemRefs
+        elseif folderRef.Name == "Unique" then petRefsUnique = itemRefs
         end
     else
-        if folder.Name == "Basic" then auraRefsBasic = itemRefs
-        elseif folder.Name == "Advanced" then auraRefsAdv = itemRefs
-        elseif folder.Name == "Rare" then auraRefsRare = itemRefs
-        elseif folder.Name == "Epic" then auraRefsEpic = itemRefs
-        elseif folder.Name == "Unique" then auraRefsUnique = itemRefs
+        if folderRef.Name == "Basic" then auraRefsBasic = itemRefs
+        elseif folderRef.Name == "Advanced" then auraRefsAdv = itemRefs
+        elseif folderRef.Name == "Rare" then auraRefsRare = itemRefs
+        elseif folderRef.Name == "Epic" then auraRefsEpic = itemRefs
+        elseif folderRef.Name == "Unique" then auraRefsUnique = itemRefs
         end
     end
 end
 
-local function setupFolderWatcher(folder, dropdownObj, category)
+local function setupFolderWatcher(folder, dropdownObj, category, subCategory)
     if not folder then return end
-    -- ChildAdded: mark new item as NEW, refresh dropdown
-    folder.ChildAdded:Connect(function(child)
-        -- compute display name after a tiny delay to allow other adds to settle
-        task.defer(function()
-            local counts = {}
-            local displayName = nil
-            for _, item in ipairs(folder:GetChildren()) do
-                local baseName = item.Name
-                counts[baseName] = (counts[baseName] or 0) + 1
-                if item == child then
-                    displayName = baseName .. " #" .. counts[baseName]
-                end
-            end
-            if displayName then
-                local marks = (category == "pet") and itemMarks.pets or itemMarks.auras
-                marks[displayName] = "NEW"
-                -- clear mark after 3 seconds
-                if newTimers[displayName] then
-                    newTimers[displayName]:Disconnect()
-                end
-                newTimers[displayName] = task.delay(3, function()
-                    marks[displayName] = nil
-                    refreshPetDropdown(category, folder, dropdownObj)
-                    newTimers[displayName] = nil
-                end)
-                refreshPetDropdown(category, folder, dropdownObj)
-            end
-        end)
-    end)
-    folder.ChildRemoved:Connect(function()
-        task.wait(0.1)
-        refreshPetDropdown(category, folder, dropdownObj)
-    end)
+    local function update()
+        refreshPetDropdown(subCategory, folder, dropdownObj, category)
+    end
+    folder.ChildAdded:Connect(update)
+    folder.ChildRemoved:Connect(update)
+    -- also watch for changes inside items? (for CHANGED marking)
+    for _, item in ipairs(folder:GetChildren()) do
+        if item:IsA("BoolValue") or item:IsA("NumberValue") or item:IsA("IntValue") then
+            -- we'll use a single loop for all attribute changes; simpler: periodic check in main loop
+        end
+    end
 end
 
-local petRefsBasic, petRefsAdv, petRefsRare, petRefsEpic, petRefsUnique = {}, {}, {}, {}, {}
-local auraRefsBasic, auraRefsAdv, auraRefsRare, auraRefsEpic, auraRefsUnique = {}, {}, {}, {}, {}
-
--- Periodic monitor for CHANGED marks (and also NEW if missed by ChildAdded)
+-- Periodic check for value changes (every 2 seconds)
 local function startStatsChangeMonitor()
     task.spawn(function()
         while true do
@@ -1289,93 +1259,84 @@ local function startStatsChangeMonitor()
                 for _, rarityFolder in ipairs({"Basic", "Advanced", "Rare", "Epic", "Unique"}) do
                     local f = petsFolder:FindFirstChild(rarityFolder)
                     if f then
-                        local currentItems = {}
                         for _, item in ipairs(f:GetChildren()) do
                             local baseName = item.Name
-                            currentItems[baseName] = (currentItems[baseName] or 0) + 1
-                            local displayName = baseName .. " #" .. currentItems[baseName]
-                            local oldSnap = lastItemSnap.pets[displayName]
+                            -- we need to find its display name (with #)
+                            local count = 0
+                            for _, other in ipairs(f:GetChildren()) do
+                                if other.Name == baseName then count = count + 1 end
+                                if other == item then break end
+                            end
+                            local displayName = baseName .. " #" .. count
+                            local oldSnap = lastItemSnap.pets and lastItemSnap.pets[displayName]
                             local newSnap = getItemSnapshot(item)
-                            if not oldSnap then
-                                -- new item (should be caught by ChildAdded, but backup)
-                                itemMarks.pets[displayName] = "NEW"
-                                if newTimers[displayName] then newTimers[displayName]:Disconnect() end
-                                newTimers[displayName] = task.delay(3, function()
-                                    itemMarks.pets[displayName] = nil
-                                    local dd = getDropdownForRarity(rarityFolder, "pet")
-                                    if dd then refreshPetDropdown("pet", f, dd) end
-                                    newTimers[displayName] = nil
-                                end)
-                            else
-                                local changed = (oldSnap.xp ~= newSnap.xp) or (oldSnap.level ~= newSnap.level)
+                            if oldSnap then
+                                local changed = false
+                                if oldSnap.xp ~= newSnap.xp or oldSnap.level ~= newSnap.level then changed = true end
                                 for _, stat in ipairs({"strength", "durability", "agility", "damage"}) do
                                     if oldSnap[stat] ~= newSnap[stat] then changed = true break end
                                 end
                                 if changed then
-                                    itemMarks.pets[displayName] = "CHANGED"
-                                    if changedTimers[displayName] then changedTimers[displayName]:Disconnect() end
-                                    changedTimers[displayName] = task.delay(2, function()
-                                        if itemMarks.pets[displayName] == "CHANGED" then
-                                            itemMarks.pets[displayName] = nil
-                                            local dd = getDropdownForRarity(rarityFolder, "pet")
-                                            if dd then refreshPetDropdown("pet", f, dd) end
-                                        end
-                                        changedTimers[displayName] = nil
-                                    end)
+                                    if not itemMarks.pets[displayName] or itemMarks.pets[displayName] ~= "CHANGED" then
+                                        itemMarks.pets[displayName] = "CHANGED"
+                                        if changedTimers[displayName] then changedTimers[displayName]:Disconnect() end
+                                        changedTimers[displayName] = task.delay(2, function()
+                                            if itemMarks.pets[displayName] == "CHANGED" then
+                                                itemMarks.pets[displayName] = nil
+                                                refreshPetDropdown(rarityFolder, f, getDropdownForRarity(rarityFolder, "pet"), "pets")
+                                            end
+                                            changedTimers[displayName] = nil
+                                        end)
+                                        refreshPetDropdown(rarityFolder, f, getDropdownForRarity(rarityFolder, "pet"), "pets")
+                                    end
                                 end
                             end
+                            if not lastItemSnap.pets then lastItemSnap.pets = {} end
                             lastItemSnap.pets[displayName] = newSnap
                         end
-                        -- refresh the dropdown to show marks
-                        local dd = getDropdownForRarity(rarityFolder, "pet")
-                        if dd then refreshPetDropdown("pet", f, dd) end
                     end
                 end
             end
-            -- auras
+            -- similar for auras
             local aurasFolder = tp:FindFirstChild("powerUpsFolder")
             if aurasFolder then
                 for _, rarityFolder in ipairs({"Basic", "Advanced", "Rare", "Epic", "Unique"}) do
                     local f = aurasFolder:FindFirstChild(rarityFolder)
                     if f then
-                        local currentItems = {}
                         for _, item in ipairs(f:GetChildren()) do
                             local baseName = item.Name
-                            currentItems[baseName] = (currentItems[baseName] or 0) + 1
-                            local displayName = baseName .. " #" .. currentItems[baseName]
-                            local oldSnap = lastItemSnap.auras[displayName]
+                            local count = 0
+                            for _, other in ipairs(f:GetChildren()) do
+                                if other.Name == baseName then count = count + 1 end
+                                if other == item then break end
+                            end
+                            local displayName = baseName .. " #" .. count
+                            local oldSnap = lastItemSnap.auras and lastItemSnap.auras[displayName]
                             local newSnap = getItemSnapshot(item)
-                            if not oldSnap then
-                                itemMarks.auras[displayName] = "NEW"
-                                if newTimers[displayName] then newTimers[displayName]:Disconnect() end
-                                newTimers[displayName] = task.delay(3, function()
-                                    itemMarks.auras[displayName] = nil
-                                    local dd = getDropdownForRarity(rarityFolder, "aura")
-                                    if dd then refreshPetDropdown("aura", f, dd) end
-                                    newTimers[displayName] = nil
-                                end)
-                            else
-                                local changed = (oldSnap.xp ~= newSnap.xp) or (oldSnap.level ~= newSnap.level)
+                            if oldSnap then
+                                local changed = false
+                                if oldSnap.xp ~= newSnap.xp or oldSnap.level ~= newSnap.level then changed = true end
                                 for _, stat in ipairs({"strength", "durability", "agility", "damage"}) do
                                     if oldSnap[stat] ~= newSnap[stat] then changed = true break end
                                 end
                                 if changed then
-                                    itemMarks.auras[displayName] = "CHANGED"
-                                    if changedTimers[displayName] then changedTimers[displayName]:Disconnect() end
-                                    changedTimers[displayName] = task.delay(2, function()
-                                        if itemMarks.auras[displayName] == "CHANGED" then
-                                            itemMarks.auras[displayName] = nil
-                                            local dd = getDropdownForRarity(rarityFolder, "aura")
-                                            if dd then refreshPetDropdown("aura", f, dd) end
-                                        end
-                                        changedTimers[displayName] = nil
-                                    end)
+                                    if not itemMarks.auras[displayName] or itemMarks.auras[displayName] ~= "CHANGED" then
+                                        itemMarks.auras[displayName] = "CHANGED"
+                                        if changedTimers[displayName] then changedTimers[displayName]:Disconnect() end
+                                        changedTimers[displayName] = task.delay(2, function()
+                                            if itemMarks.auras[displayName] == "CHANGED" then
+                                                itemMarks.auras[displayName] = nil
+                                                refreshPetDropdown(rarityFolder, f, getDropdownForRarity(rarityFolder, "aura"), "auras")
+                                            end
+                                            changedTimers[displayName] = nil
+                                        end)
+                                        refreshPetDropdown(rarityFolder, f, getDropdownForRarity(rarityFolder, "aura"), "auras")
+                                    end
                                 end
                             end
+                            if not lastItemSnap.auras then lastItemSnap.auras = {} end
                             lastItemSnap.auras[displayName] = newSnap
                         end
-                        local dd = getDropdownForRarity(rarityFolder, "aura")
-                        if dd then refreshPetDropdown("aura", f, dd) end
                     end
                 end
             end
@@ -1402,19 +1363,57 @@ local function getDropdownForRarity(rarity, type)
     return nil
 end
 
-local lastItemSnap = { pets = {}, auras = {} }
+local function processSpecificFolderItems(folder)
+    if not folder then return {"Nothing Here"}, {} end;
+    local counts, itemRefs, found = {}, {}, false; 
+    local options = {};
+    for _, item in ipairs(folder:GetChildren()) do 
+        found = true;
+        local baseName = item.Name
+        counts[baseName] = (counts[baseName] or 0) + 1;
+        local displayName = baseName .. " #" .. counts[baseName]
+        -- check for NEW mark (if item was added after last selection)
+        if lastItemSnap and lastItemSnap.newItems and lastItemSnap.newItems[displayName] then
+            displayName = displayName .. " [NEW]"
+            itemMarks.pets[displayName] = "NEW"
+        end
+        table.insert(options, displayName)
+        itemRefs[displayName] = item 
+    end;
+    if not found then return {"Nothing Here"}, {} end; 
+    return options, itemRefs
+end
+
+local lastItemSnap = { pets = {}, auras = {}, newItems = {} }
 
 local function handleItemSelection(label, refTable, detailLabel, category)
     if not label or label == "Nothing Here" then return end;
-    -- clear marks for that item if any
-    local cleanLabel = label:gsub("%s*%[[^%]]+%]%s*", "")
+    -- remove marks when selected (except CHANGED will auto-expire)
     if category == "pet" then
-        clearMark(cleanLabel, "pet")
-        clearMark(label, "pet")
+        if itemMarks.pets[label] then
+            itemMarks.pets[label] = nil
+            -- refresh the dropdown to remove mark
+            -- find which rarity folder this belongs to
+            for rarity, dd in pairs({Basic=basicDD, Advanced=advDD, Rare=rareDD, Epic=epicDD, Unique=uniqueDD}) do
+                if dd and dd.optionsList and table.find(dd.optionsList, label) then
+                    refreshPetDropdown(rarity, getFolderForRarity(rarity, "pet"), dd, "pets")
+                    break
+                end
+            end
+        end
     else
-        clearMark(cleanLabel, "aura")
-        clearMark(label, "aura")
+        if itemMarks.auras[label] then
+            itemMarks.auras[label] = nil
+            for rarity, dd in pairs({Basic=auraBasicDD, Advanced=auraAdvDD, Rare=auraRareDD, Epic=auraEpicDD, Unique=auraUniqueDD}) do
+                if dd and dd.optionsList and table.find(dd.optionsList, label) then
+                    refreshPetDropdown(rarity, getFolderForRarity(rarity, "aura"), dd, "auras")
+                    break
+                end
+            end
+        end
     end
+    
+    local cleanLabel = label:gsub("%s*%[[^%]]+%]%s*", "")
     local item = refTable[cleanLabel] or refTable[label]
     if item then
         local isEvolved = false
@@ -1427,19 +1426,24 @@ local function handleItemSelection(label, refTable, detailLabel, category)
         if perks then local pObj = perks:FindFirstChild(pName); if pObj then fv = formatNum(pObj:IsA("ValueBase") and pObj.Value or (pObj:FindFirstChild("Value") and pObj.Value.Value)) end end;
         txt = txt .. pName:sub(1,1):upper() .. pName:sub(2) .. ": " .. fv .. "\n" end;
         detailLabel.Text = txt
-        -- refresh dropdown to remove mark after selection
-        if category == "pet" then
-            local rarity = (states.currentPetTable or "Basic")
-            local dd = getDropdownForRarity(rarity, "pet")
-            local folder = getFolderForRarity(rarity, "pet")
-            if dd and folder then refreshPetDropdown("pet", folder, dd) end
-        else
-            local rarity = (states.currentAuraTable or "Basic")
-            local dd = getDropdownForRarity(rarity, "aura")
-            local folder = getFolderForRarity(rarity, "aura")
-            if dd and folder then refreshPetDropdown("aura", folder, dd) end
-        end
     end
+end
+
+local function processAuraItems(folder)
+    if not folder then return {"Nothing Here"}, {} end;
+    local counts, itemRefs, found = {}, {}, false; local options = {};
+    for _, item in ipairs(folder:GetChildren()) do found = true; local baseName = item.Name; counts[baseName] = (counts[baseName] or 0) + 1;
+    local displayName = baseName .. " #" .. counts[baseName];
+    if lastItemSnap and lastItemSnap.newItems and lastItemSnap.newItems[displayName] then
+        displayName = displayName .. " [NEW]"
+        itemMarks.auras[displayName] = "NEW"
+    end
+    table.insert(options, displayName); itemRefs[displayName] = item end;
+    if not found then return {"Nothing Here"}, {} end; return options, itemRefs
+end
+
+local function handleAuraSelection(label, refTable, detailLabel)
+    handleItemSelection(label, refTable, detailLabel, "aura")
 end
 
 local function clearPetAuraUI()
@@ -1468,22 +1472,10 @@ local function resetStatsUI()
     if statsPlayerDD then statsPlayerDD.setHeaderText("Player Dropdown v") end
     if trackToggle then SetToggle[trackToggle](false) end
     clearPetAuraUI()
-    lastItemSnap = { pets = {}, auras = {} }
 end
 
-function getFolderForRarity(rarity, type)
-    local target = states.statsTarget
-    if not target then return nil end
-    local plr = Players:FindFirstChild(target)
-    if not plr then return nil end
-    if type == "pet" then
-        local petsF = plr:FindFirstChild("petsFolder")
-        return petsF and petsF:FindFirstChild(rarity)
-    else
-        local powersF = plr:FindFirstChild("powerUpsFolder")
-        return powersF and powersF:FindFirstChild(rarity)
-    end
-end
+local petRefsBasic, petRefsAdv, petRefsRare, petRefsEpic, petRefsUnique = {}, {}, {}, {}, {}
+local auraRefsBasic, auraRefsAdv, auraRefsRare, auraRefsEpic, auraRefsUnique = {}, {}, {}, {}, {}
 
 statsPlayerDD = createDropdown(f4, "Player Dropdown", {}, false, function(label) 
     local newTarget = nameMap[label] or label
@@ -1494,32 +1486,22 @@ statsPlayerDD = createDropdown(f4, "Player Dropdown", {}, false, function(label)
         states.trackStats = false
         if trackToggle then SetToggle[trackToggle](false) end
         clearPetAuraUI()
-        lastItemSnap = { pets = {}, auras = {} }
         
         local tp = Players:FindFirstChild(newTarget)
         if tp then
             local petsF = tp:FindFirstChild("petsFolder")
-            for _, rarity in ipairs({"Basic","Advanced","Rare","Epic","Unique"}) do
-                local folder = petsF and petsF:FindFirstChild(rarity)
-                local dd = getDropdownForRarity(rarity, "pet")
-                if folder and dd then
-                    refreshPetDropdown("pet", folder, dd)
-                    setupFolderWatcher(folder, dd, "pet")
-                elseif dd then
-                    dd.refresh({"Nothing Here"})
-                end
-            end
+            local oB, rB = processSpecificFolderItems(petsF and petsF:FindFirstChild("Basic")); petRefsBasic = rB; basicDD.refresh(oB)
+            local oA, rA = processSpecificFolderItems(petsF and petsF:FindFirstChild("Advanced")); petRefsAdv = rA; advDD.refresh(oA)
+            local oR, rR = processSpecificFolderItems(petsF and petsF:FindFirstChild("Rare")); petRefsRare = rR; rareDD.refresh(oR)
+            local oE, rE = processSpecificFolderItems(petsF and petsF:FindFirstChild("Epic")); petRefsEpic = rE; epicDD.refresh(oE)
+            local oU, rU = processSpecificFolderItems(petsF and petsF:FindFirstChild("Unique")); petRefsUnique = rU; uniqueDD.refresh(oU)
+            
             local powerUpsF = tp:FindFirstChild("powerUpsFolder")
-            for _, rarity in ipairs({"Basic","Advanced","Rare","Epic","Unique"}) do
-                local folder = powerUpsF and powerUpsF:FindFirstChild(rarity)
-                local dd = getDropdownForRarity(rarity, "aura")
-                if folder and dd then
-                    refreshPetDropdown("aura", folder, dd)
-                    setupFolderWatcher(folder, dd, "aura")
-                elseif dd then
-                    dd.refresh({"Nothing Here"})
-                end
-            end
+            local oAB, rAB = processAuraItems(powerUpsF and powerUpsF:FindFirstChild("Basic")); auraRefsBasic = rAB; auraBasicDD.refresh(oAB)
+            local oAA, rAA = processAuraItems(powerUpsF and powerUpsF:FindFirstChild("Advanced")); auraRefsAdv = rAA; auraAdvDD.refresh(oAA)
+            local oAR, rAR = processAuraItems(powerUpsF and powerUpsF:FindFirstChild("Rare")); auraRefsRare = rAR; auraRareDD.refresh(oAR)
+            local oAE, rAE = processAuraItems(powerUpsF and powerUpsF:FindFirstChild("Epic")); auraRefsEpic = rAE; auraEpicDD.refresh(oAE)
+            local oAU, rAU = processAuraItems(powerUpsF and powerUpsF:FindFirstChild("Unique")); auraRefsUnique = rAU; auraUniqueDD.refresh(oAU)
         end
     end 
 end)
@@ -1567,11 +1549,11 @@ auraDetails = Instance.new("TextLabel", f4); auraDetails.Size = UDim2.new(1, -10
 auraDetails.BackgroundTransparency = 1; auraDetails.TextColor3 = Color3.new(1, 1, 1); auraDetails.TextXAlignment = Enum.TextXAlignment.Left; auraDetails.TextYAlignment = Enum.TextYAlignment.Top;
 auraDetails.Text = "Select an Aura to view stats"
 
-auraBasicDD = createDropdown(f4, "Basic Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; states.currentAuraTable = "Basic"; handleItemSelection(l, auraRefsBasic, auraDetails, "aura") end)
-auraAdvDD = createDropdown(f4, "Advance Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; states.currentAuraTable = "Advanced"; handleItemSelection(l, auraRefsAdv, auraDetails, "aura") end)
-auraRareDD = createDropdown(f4, "Rare Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; states.currentAuraTable = "Rare"; handleItemSelection(l, auraRefsRare, auraDetails, "aura") end)
-auraEpicDD = createDropdown(f4, "Epic Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; states.currentAuraTable = "Epic"; handleItemSelection(l, auraRefsEpic, auraDetails, "aura") end)
-auraUniqueDD = createDropdown(f4, "Unique Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; states.currentAuraTable = "Unique"; handleItemSelection(l, auraRefsUnique, auraDetails, "aura") end)
+auraBasicDD = createDropdown(f4, "Basic Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; states.currentAuraTable = "Basic"; handleAuraSelection(l, auraRefsBasic, auraDetails) end)
+auraAdvDD = createDropdown(f4, "Advance Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; states.currentAuraTable = "Advanced"; handleAuraSelection(l, auraRefsAdv, auraDetails) end)
+auraRareDD = createDropdown(f4, "Rare Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; states.currentAuraTable = "Rare"; handleAuraSelection(l, auraRefsRare, auraDetails) end)
+auraEpicDD = createDropdown(f4, "Epic Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; states.currentAuraTable = "Epic"; handleAuraSelection(l, auraRefsEpic, auraDetails) end)
+auraUniqueDD = createDropdown(f4, "Unique Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; states.currentAuraTable = "Unique"; handleAuraSelection(l, auraRefsUnique, auraDetails) end)
 
 local ultHeader = Instance.new("TextLabel", f4); ultHeader.Size = UDim2.new(1, -10, 0, 20); ultHeader.Text = "--- ULTIMATES ---"; ultHeader.BackgroundTransparency = 1; ultHeader.TextColor3 = Color3.fromRGB(0, 200, 200); ultHeader.Font = Enum.Font.SourceSansBold; ultHeader.TextXAlignment = Enum.TextXAlignment.Left
 local ultList = Instance.new("TextLabel", f4); ultList.Size = UDim2.new(1, -10, 0, 250); ultList.BackgroundTransparency = 1; ultList.TextColor3 = Color3.new(1, 1, 1); ultList.TextXAlignment = Enum.TextXAlignment.Left; ultList.TextYAlignment = Enum.TextYAlignment.Top; ultList.Text = "None"; ultList.TextWrapped = true; ultList.AutomaticSize = Enum.AutomaticSize.Y
@@ -1581,6 +1563,21 @@ local gpList = Instance.new("TextLabel", f4); gpList.Size = UDim2.new(1, -10, 0,
 
 -- Start change monitor for stats
 startStatsChangeMonitor()
+
+-- Helper to get folder for rarity
+function getFolderForRarity(rarity, type)
+    local target = states.statsTarget
+    if not target then return nil end
+    local plr = Players:FindFirstChild(target)
+    if not plr then return nil end
+    if type == "pet" then
+        local petsF = plr:FindFirstChild("petsFolder")
+        return petsF and petsF:FindFirstChild(rarity)
+    else
+        local powersF = plr:FindFirstChild("powerUpsFolder")
+        return powersF and powersF:FindFirstChild(rarity)
+    end
+end
 
 -- ==================== TAB 5: AUTO GYM ====================
 local f5 = frames["Auto Gym"]
@@ -2839,7 +2836,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         if states.stopEverything then continue end
         local killList, statsList, currentMap = {}, {}, {}
         for _, p in ipairs(Players:GetPlayers()) do 
-            local dName = p.DisplayName  -- Changed: Display Name only
+            local dName = p.DisplayName .. " (@" .. p.Name .. ")"
             currentMap[dName] = p.Name
             table.insert(statsList, dName)
             if p ~= player then
