@@ -1,6 +1,7 @@
 getgenv().ML_Expert_UI = nil
 getgenv().ML_Expert_Loops = nil
 
+-- Destroy previous UI and loops if exist
 if getgenv().ML_Expert_UI then pcall(function() getgenv().ML_Expert_UI:Destroy() end) end
 if getgenv().ML_Expert_Loops then
     for _, loop in ipairs(getgenv().ML_Expert_Loops) do pcall(task.cancel, loop) end
@@ -20,6 +21,7 @@ local player = Players.LocalPlayer
 
 local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 
+-- ==================== FILE SAVE (DISCONNECT & CONFIG) ====================
 local Config = { SizeValue = "1", RebirthTarget = "0", WalkSpeed = "16", FlySpeed = "50" }
 
 local function SaveConfig()
@@ -49,6 +51,7 @@ game:GetService("GuiService").ErrorMessageChanged:Connect(function(msg)
     end
 end)
 
+-- ==================== STATE VARIABLES ====================
 local states = {
     selectedRock = nil, selectedMethod = nil, autoGlitch = false, autoGlitchTrain = false,
     glitchStartTime = 0, glitchAccumulated = 0, preGlitchPos = nil, isTransitioning = false,
@@ -69,8 +72,7 @@ local states = {
     autoUnequipBoosts = false,
     stopEverything = false,
     walkOnWater = true,
-    selectedTreadmill = nil, autoTreadmill = false, autoTreadmillThread = nil,
-    treadmillForwardVelocity = nil
+    selectedTreadmill = nil, autoTreadmill = false, autoTreadmillThread = nil
 }
 
 local rockCache = {}
@@ -98,6 +100,7 @@ local rockData = {
     ["Jungle Rock"]      = {req = 10000000,name = "Ancient Jungle Rock", idx = 1, glitchValue = 16.25}
 }
 
+-- Gym data
 local gymData = {
     ["Tiny Island"] = {
         ["Bench Press"] = {pos = Vector3.new(67.105286, 6.714245, 1984.269043), cost = 10},
@@ -167,17 +170,19 @@ local gymData = {
     }
 }
 
+-- Treadmill Data (renamed as requested)
 local treadmillData = {
     ["Tiny Treadmill"] = { exp = 1, pos = Vector3.new(237.729019, 9.687672, 387.652649) },
     ["Small Treadmill"] = { exp = 2, pos = Vector3.new(238.908203, 9.687671, 358.320312) },
     ["Medium Treadmill"] = { exp = 3, pos = Vector3.new(232.890976, 10.313229, 326.141510) },
     ["Large Treadmill"] = { exp = 4, pos = Vector3.new(224.219528, 11.157012, 279.926788) },
-    ["Huge Treadmill"] = { exp = 5, pos = Vector3.new(212.168045, 12.437231, 220.112839) },
-    ["Mystic Huge Treadmill"] = { exp = 6, pos = Vector3.new(2658.494873, 25.894060, 932.837830) },
+    ["Big Treadmill"] = { exp = 5, pos = Vector3.new(212.168045, 12.437231, 220.112839) },        -- renamed from Huge Treadmill
+    ["Mystic Treadmill"] = { exp = 6, pos = Vector3.new(2658.494873, 25.894060, 932.837830) },   -- renamed from Mystic Huge Treadmill
     ["Legend Treadmill"] = { exp = 7, pos = Vector3.new(4368.882324, 1003.612976, -3639.254395) },
     ["Jungle Treadmill"] = { exp = 8, pos = Vector3.new(-8132.056152, 32.226238, 2815.331787) }
 }
 
+-- ==================== UTILITIES ====================
 local function getRockInstance(configName)
     local data = rockData[configName]
     if not data then return nil end
@@ -311,6 +316,7 @@ local function getStrength()
     return player.leaderstats and player.leaderstats:FindFirstChild("Strength") and player.leaderstats.Strength.Value or 0
 end
 
+-- ==================== AUTO GYM SECTION ====================
 local function findBestSeat(nearPos)
     local folder = workspace:FindFirstChild("machinesFolder")
     if not folder then return nil end
@@ -443,15 +449,16 @@ local function startAutoGym()
     end)
 end
 
+-- ==================== AUTO TREADMILL SECTION (UPDATED) ====================
 local function stopAutoTreadmill()
     if states.autoTreadmillThread then
         pcall(task.cancel, states.autoTreadmillThread)
         states.autoTreadmillThread = nil
     end
-    if states.treadmillForwardVelocity then
-        states.treadmillForwardVelocity:Destroy()
-        states.treadmillForwardVelocity = nil
-    end
+    -- Release W key when stopping
+    pcall(function()
+        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.W, false, nil)
+    end)
     states.autoTreadmill = false
 end
 
@@ -460,49 +467,7 @@ local function startAutoTreadmill()
     if not states.selectedTreadmill then return end
     states.autoTreadmill = true
 
-    local lastTpTime   = 0
-    local lastFireTime = 0
-    local TP_CD        = 0.5
-    local FIRE_CD      = 0.15
-    local wDown = false
-
-    local function setForwardMove(active)
-        if active then
-            if isMobile then
-                if not states.treadmillForwardVelocity then
-                    local char = player.Character
-                    if char and char:FindFirstChild("HumanoidRootPart") then
-                        states.treadmillForwardVelocity = Instance.new("BodyVelocity")
-                        states.treadmillForwardVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-                        states.treadmillForwardVelocity.Velocity = Vector3.new(0, 0, 0)
-                        states.treadmillForwardVelocity.Parent = char.HumanoidRootPart
-                    end
-                end
-                local char = player.Character
-                if char and char:FindFirstChild("HumanoidRootPart") and states.treadmillForwardVelocity then
-                    local forward = char.HumanoidRootPart.CFrame.LookVector * 16
-                    states.treadmillForwardVelocity.Velocity = Vector3.new(forward.X, 0, forward.Z)
-                end
-            else
-                if not wDown then
-                    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.W, false, nil)
-                    wDown = true
-                end
-            end
-        else
-            if isMobile then
-                if states.treadmillForwardVelocity then
-                    states.treadmillForwardVelocity:Destroy()
-                    states.treadmillForwardVelocity = nil
-                end
-            else
-                if wDown then
-                    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.W, false, nil)
-                    wDown = false
-                end
-            end
-        end
-    end
+    local wKeyDown = false
 
     states.autoTreadmillThread = task.spawn(function()
         while states.autoTreadmill and states.selectedTreadmill do
@@ -516,43 +481,42 @@ local function startAutoTreadmill()
             if not char then continue end
             local root = char:FindFirstChild("HumanoidRootPart")
             local hum  = char:FindFirstChild("Humanoid")
-            if not root or not hum or hum.Health <= 0 then
-                setForwardMove(false)
-                continue
-            end
+            if not root or not hum or hum.Health <= 0 then continue end
 
-            if hum.Sit then
-                setForwardMove(false)
-                continue
-            end
+            if hum.Sit then continue end
 
-            local now = tick()
+            -- Teleport to treadmill position (no cooldown)
+            pcall(function()
+                root.CFrame = CFrame.new(treadmill.pos + Vector3.new(0, 4, 0))
+                root.AssemblyLinearVelocity = Vector3.zero
+            end)
 
-            if now - lastTpTime >= TP_CD then
+            -- Hold W key (send once; key stays held)
+            if not wKeyDown then
                 pcall(function()
-                    local targetPos = treadmill.pos + Vector3.new(0, 4, 0)
-                    root.CFrame = CFrame.new(targetPos) * CFrame.Angles(0, math.rad(180), 0)
-                    root.AssemblyLinearVelocity = Vector3.zero
+                    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.W, false, nil)
                 end)
-                lastTpTime = now
+                wKeyDown = true
             end
 
-            setForwardMove(true)
-
-            if now - lastFireTime >= FIRE_CD then
-                local seat = findBestSeat(treadmill.pos)
-                if seat then
-                    fireMachineInteract(seat)
-                end
-                fireEKey()
-                lastFireTime = now
+            -- Interact with treadmill seat and press E (no cooldown)
+            local seat = findBestSeat(treadmill.pos)
+            if seat then
+                fireMachineInteract(seat)
             end
+            fireEKey()
         end
-        setForwardMove(false)
+        -- Release W key when loop ends
+        if wKeyDown then
+            pcall(function()
+                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.W, false, nil)
+            end)
+        end
         states.autoTreadmill = false
     end)
 end
 
+-- ==================== AUTO CRYSTAL FUNCTIONS ====================
 local function fireBuyCrystal(data)
     if not data then return end
     pcall(function()
@@ -602,6 +566,7 @@ local function startAutoAuraBuy()
     end)
 end
 
+-- ==================== UI FRAMEWORK ====================
 local ScreenGui = Instance.new("ScreenGui", player.PlayerGui)
 ScreenGui.Name = "MuscleLegendsHub"
 ScreenGui.ResetOnSpawn = false
@@ -745,6 +710,7 @@ if isMobile then
     end
 end
 
+-- ==================== UI COMPONENTS HELPER ====================
 local SetToggle = {}
 local function createToggle(parent, text, key, callback)
     local btn = Instance.new("TextButton", parent)
@@ -905,6 +871,7 @@ end
 
 local lockPosBtn, autoRebirthTargetBtn, autoRebirthInfBtn, trackToggle
 
+-- ==================== KILL VISIBILITY ====================
 local function updateVisibility(isInvisible) end
 local function checkResetKillAttackTime()
     if not states.killActive and not states.killEveryone and not states.autoGoodKarma and not states.autoEvilKarma then
@@ -913,6 +880,7 @@ local function checkResetKillAttackTime()
     end
 end
 
+-- ==================== TAB 1: AUTO FARM ====================
 local f1 = frames["Auto Farm"]
 
 local selectRockDD = createDropdown(f1, "Select Rock", {"Tiny Rock", "Punching Rock", "Large Rock", "Golden Rock", "Frozen Rock", "Mystic Rock", "Inferno Rock", "Legend Rock", "Muscle King Rock", "Jungle Rock"}, false, function(v) 
@@ -1106,6 +1074,7 @@ createToggle(f1, "Accelerate Rep Speed", "accelReps", function(val)
 end)
 createToggle(f1, "Fast Punch", "fastPunch", function(val) states.fastPunch = val; local p = getPunch(); if p and p:FindFirstChild("attackTime") then p.attackTime.Value = val and 0 or 0.35 end end)
 
+-- ==================== TAB 2: FARM ====================
 local f2 = frames["Farm"]
 createToggle(f2, "Less Lag", "lessLag", function(val) states.lessLag = val end)
 
@@ -1237,6 +1206,7 @@ openAllChestsBtn.MouseButton1Click:Connect(function()
     end
 end)
 
+-- ==================== TAB 3: KILLER ====================
 local f3 = frames["Killer"]
 local pKillDD = createDropdown(f3, "Player Dropdown", {}, true, function(label) local realName = nameMap[label] or label; if states.killTargets[realName] then states.killTargets[realName] = nil; return false else states.killTargets[realName] = true; return true end end, function(label) local r = nameMap[label] or label; return states.killTargets[r] end)
 local whiteDD = createDropdown(f3, "Whitelist Dropdown", {}, true, function(label) local realName = nameMap[label] or label; if states.whitelist[realName] then states.whitelist[realName] = nil; return false else states.whitelist[realName] = true; return true end end, function(label) local r = nameMap[label] or label; return states.whitelist[r] end)
@@ -1247,6 +1217,7 @@ createToggle(f3, "Kill Everyone", nil, function(v) states.killEveryone = v; if v
 createToggle(f3, "Auto Good Karma", nil, function(v) states.autoGoodKarma = v; if v then updateVisibility(true) else checkResetKillAttackTime() end end)
 createToggle(f3, "Auto Evil Karma", nil, function(v) states.autoEvilKarma = v; if v then updateVisibility(true) else checkResetKillAttackTime() end end)
 
+-- ==================== TAB 4: STATS & INVENTORY (LIVE UPDATE) ====================
 local f4 = frames["Stats"]
 local statsPlayerDD
 local basicDD, advDD, rareDD, epicDD, uniqueDD
@@ -1280,6 +1251,15 @@ local function refreshPetDropdown(folder, dropdownObj, refStore)
         table.clear(refStore)
         for k, v in pairs(itemRefs) do refStore[k] = v end
     end
+end
+
+local function setupFolderWatcher(folder, dropdownObj, refStore)
+    if not folder then return end
+    local function update()
+        refreshPetDropdown(folder, dropdownObj, refStore)
+    end
+    folder.ChildAdded:Connect(update)
+    folder.ChildRemoved:Connect(update)
 end
 
 local function handleItemSelection(label, refTable, detailLabel)
@@ -1421,6 +1401,7 @@ local ultList = Instance.new("TextLabel", f4); ultList.Size = UDim2.new(1, -10, 
 local gpHeader = Instance.new("TextLabel", f4); gpHeader.Size = UDim2.new(1, -10, 0, 20); gpHeader.Text = "--- GAMEPASSES ---"; gpHeader.BackgroundTransparency = 1; gpHeader.TextColor3 = Color3.fromRGB(0, 200, 100); gpHeader.Font = Enum.Font.SourceSansBold; gpHeader.TextXAlignment = Enum.TextXAlignment.Left
 local gpList = Instance.new("TextLabel", f4); gpList.Size = UDim2.new(1, -10, 0, 200); gpList.BackgroundTransparency = 1; gpList.TextColor3 = Color3.new(1, 1, 1); gpList.TextXAlignment = Enum.TextXAlignment.Left; gpList.TextYAlignment = Enum.TextYAlignment.Top; gpList.Text = "None"; gpList.TextWrapped = true; gpList.AutomaticSize = Enum.AutomaticSize.Y
 
+-- ==================== TAB 5: AUTO GYM ====================
 local f5 = frames["Auto Gym"]
 
 local mapDD
@@ -1501,6 +1482,7 @@ local autoGymBtn = createToggle(f5, "Auto Gym", "autoGym", function(val)
     return val
 end)
 
+-- ==================== TAB 6: AUTO TREADMILL (UPDATED) ====================
 local f6 = frames["Auto Treadmill"]
 
 local treadmillOptions = {}
@@ -1518,6 +1500,8 @@ local treadmillDD = createDropdown(f6, "Select Treadmill", treadmillOptions, fal
     end
 end)
 
+-- "Go to Treadmill" button removed as requested
+
 local autoTreadmillBtn = createToggle(f6, "Auto Treadmill", "autoTreadmill", function(val)
     if val then
         if not states.selectedTreadmill then return false end
@@ -1528,6 +1512,7 @@ local autoTreadmillBtn = createToggle(f6, "Auto Treadmill", "autoTreadmill", fun
     return val
 end)
 
+-- ==================== TAB 7: AUTO CRYSTAL ====================
 local f7 = frames["Auto Crystal"]
 
 local petList = {}
@@ -1736,6 +1721,7 @@ end
 createCrystalSection(f7, "--- PETS ---", petList, "selectedPetCrystalData", "selectedPetCrystal", startAutoPetBuy, stopAutoPetBuy)
 createCrystalSection(f7, "--- AURAS ---", auraList, "selectedAuraCrystalData", "selectedAuraCrystal", startAutoAuraBuy, stopAutoAuraBuy)
 
+-- ==================== TAB 8: GLITCHABLE REBIRTH ====================
 local f8 = frames["Glitchable Rebirth"]
 
 local glitchRockOptions = {}
@@ -1866,6 +1852,7 @@ petExpCalcLabel.Font = Enum.Font.Gotham
 petExpCalcLabel.TextSize = 12
 _G.GlitchPetExpCalcLabel = petExpCalcLabel
 
+-- ==================== TAB 9: CALCULATOR ====================
 local f9 = frames["Calculator"]
 
 local calcInput = Instance.new("TextBox", f9)
@@ -1918,6 +1905,7 @@ clearCalcBtn.MouseButton1Click:Connect(function()
     calcResultLabel.Text = "Result: "
 end)
 
+-- ==================== TAB 10: TELEPORT ====================
 local f10 = frames["Teleport"]
 
 local teleportList = {
@@ -1946,6 +1934,7 @@ for _, tpData in ipairs(teleportList) do
     end)
 end
 
+-- ==================== TAB 11: CONFIG ====================
 local f11 = frames["Config"]
 
 local configFilePath = "ML_Expert_Configs.json"
@@ -2202,6 +2191,7 @@ removeConfigBtn.MouseButton1Click:Connect(function()
     end)
 end)
 
+-- ==================== MAIN LOOPS ====================
 table.insert(getgenv().ML_Expert_Loops, RunService.Heartbeat:Connect(function()
     if states.stopEverything then return end
     if states.autoMuscleKing then
@@ -2760,6 +2750,7 @@ end))
 
 SetToggle[walkOnWaterBtn](true)
 
+-- Cleanup on script unload
 local function onUnload()
     for _, loop in ipairs(getgenv().ML_Expert_Loops or {}) do pcall(task.cancel, loop) end
     if getgenv().ML_Expert_UI then pcall(function() getgenv().ML_Expert_UI:Destroy() end) end
@@ -2768,7 +2759,6 @@ local function onUnload()
         if states.flyBody.Gyro then states.flyBody.Gyro:Destroy() end
     end
     if walkOnWaterPlatform then walkOnWaterPlatform:Destroy() end
-    if states.treadmillForwardVelocity then states.treadmillForwardVelocity:Destroy() end
     for rock, data in pairs(rockCache) do
         if rock and rock.Parent then
             rock.Size = data.Size
