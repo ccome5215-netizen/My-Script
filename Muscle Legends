@@ -516,10 +516,11 @@ local function checkAllPlayersStrength()
             
             local rebStat = plr.leaderstats:FindFirstChild("Rebirths")
             if rebStat then rebirth = rebStat.Value end
-            
-            local durStat = plr.leaderstats:FindFirstChild("Durability")
-            if durStat then durability = durStat.Value end
         end
+        
+        -- Fix: Durability is a direct child of player, not in leaderstats
+        local durStat = plr:FindFirstChild("Durability")
+        if durStat then durability = durStat.Value end
         
         table.insert(leaderboardData, {
             name = plr.DisplayName .. " (@" .. plr.Name .. ")",
@@ -1993,11 +1994,19 @@ function updateLeaderboardDisplay()
         nameLabel.TextXAlignment = Enum.TextXAlignment.Left
         nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
         
+        -- Custom rebirth display: no formatting unless >= 1 million
+        local rebirthDisplay
+        if entry.rebirth >= 1000000 then
+            rebirthDisplay = formatNum(entry.rebirth)
+        else
+            rebirthDisplay = tostring(math.floor(entry.rebirth))
+        end
+        
         local strengthLabel = Instance.new("TextLabel", entryFrame)
         strengthLabel.Size = UDim2.new(1, -55, 0, 20)
         strengthLabel.Position = UDim2.fromOffset(50, 22)
         strengthLabel.BackgroundTransparency = 1
-        strengthLabel.Text = "Strength: " .. formatNum(entry.strength) .. " | Rebirth: " .. formatNum(entry.rebirth) .. " | Durability: " .. formatNum(entry.durability)
+        strengthLabel.Text = "Strength: " .. formatNum(entry.strength) .. " | Rebirth: " .. rebirthDisplay .. " | Durability: " .. formatNum(entry.durability)
         strengthLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
         strengthLabel.Font = Enum.Font.Gotham
         strengthLabel.TextSize = 10
