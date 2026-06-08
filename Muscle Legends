@@ -449,16 +449,18 @@ local function startAutoGym()
     end)
 end
 
--- ==================== AUTO TREADMILL SECTION (UPDATED) ====================
+-- ==================== AUTO TREADMILL SECTION (FIXED - using Humanoid:Move) ====================
 local function stopAutoTreadmill()
     if states.autoTreadmillThread then
         pcall(task.cancel, states.autoTreadmillThread)
         states.autoTreadmillThread = nil
     end
-    -- Release W key when stopping
-    pcall(function()
-        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.W, false, nil)
-    end)
+    -- Stop walking when auto treadmill turns off
+    local char = player.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        hum:Move(Vector3.new(0, 0, 0), false)
+    end
     states.autoTreadmill = false
 end
 
@@ -467,11 +469,8 @@ local function startAutoTreadmill()
     if not states.selectedTreadmill then return end
     states.autoTreadmill = true
 
-    local wKeyDown = false
-
     states.autoTreadmillThread = task.spawn(function()
         while states.autoTreadmill and states.selectedTreadmill do
-            task.wait()
             if states.stopEverything then continue end
 
             local treadmill = treadmillData[states.selectedTreadmill]
@@ -480,37 +479,34 @@ local function startAutoTreadmill()
             local char = player.Character
             if not char then continue end
             local root = char:FindFirstChild("HumanoidRootPart")
-            local hum  = char:FindFirstChild("Humanoid")
+            local hum = char:FindFirstChildOfClass("Humanoid")
             if not root or not hum or hum.Health <= 0 then continue end
 
             if hum.Sit then continue end
 
-            -- Teleport to treadmill position (no cooldown)
+            -- Teleport to treadmill position
             pcall(function()
                 root.CFrame = CFrame.new(treadmill.pos + Vector3.new(0, 4, 0))
                 root.AssemblyLinearVelocity = Vector3.zero
             end)
 
-            -- Hold W key (send once; key stays held)
-            if not wKeyDown then
-                pcall(function()
-                    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.W, false, nil)
-                end)
-                wKeyDown = true
-            end
+            -- Make character walk forward using Humanoid:Move (as you showed)
+            hum:Move(Vector3.new(0, 0, -1), true)
 
-            -- Interact with treadmill seat and press E (no cooldown)
+            -- Interact with treadmill seat and press E
             local seat = findBestSeat(treadmill.pos)
             if seat then
                 fireMachineInteract(seat)
             end
             fireEKey()
+
+            task.wait()
         end
-        -- Release W key when loop ends
-        if wKeyDown then
-            pcall(function()
-                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.W, false, nil)
-            end)
+        -- Stop walking when loop ends
+        local char = player.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum:Move(Vector3.new(0, 0, 0), false)
         end
         states.autoTreadmill = false
     end)
