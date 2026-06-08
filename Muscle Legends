@@ -72,12 +72,14 @@ local states = {
     autoUnequipBoosts = false,
     stopEverything = false,
     walkOnWater = true,
-    selectedTreadmill = nil, autoTreadmill = false, autoTreadmillThread = nil
+    selectedTreadmill = nil, autoTreadmill = false, autoTreadmillThread = nil,
+    leaderboardData = {}
 }
 
 local rockCache = {}
 local prevRepSpeed = 5
 local nameMap = {}
+local displayNameMap = {}
 local toggleHand = false
 local lastStatValues = {}
 local statGains = {}
@@ -170,14 +172,14 @@ local gymData = {
     }
 }
 
--- Treadmill Data (renamed as requested)
+-- Treadmill Data
 local treadmillData = {
     ["Tiny Treadmill"] = { exp = 1, pos = Vector3.new(237.729019, 9.687672, 387.652649) },
     ["Small Treadmill"] = { exp = 2, pos = Vector3.new(238.908203, 9.687671, 358.320312) },
     ["Medium Treadmill"] = { exp = 3, pos = Vector3.new(232.890976, 10.313229, 326.141510) },
     ["Large Treadmill"] = { exp = 4, pos = Vector3.new(224.219528, 11.157012, 279.926788) },
-    ["Big Treadmill"] = { exp = 5, pos = Vector3.new(212.168045, 12.437231, 220.112839) },        -- renamed from Huge Treadmill
-    ["Mystic Treadmill"] = { exp = 6, pos = Vector3.new(2658.494873, 25.894060, 932.837830) },   -- renamed from Mystic Huge Treadmill
+    ["Big Treadmill"] = { exp = 5, pos = Vector3.new(212.168045, 12.437231, 220.112839) },
+    ["Mystic Treadmill"] = { exp = 6, pos = Vector3.new(2658.494873, 25.894060, 932.837830) },
     ["Legend Treadmill"] = { exp = 7, pos = Vector3.new(4368.882324, 1003.612976, -3639.254395) },
     ["Jungle Treadmill"] = { exp = 8, pos = Vector3.new(-8132.056152, 32.226238, 2815.331787) }
 }
@@ -299,7 +301,8 @@ local function isLocalPlayerMuscleKing()
     if not mkGui then return false end
     local mkLabel = mkGui:FindFirstChild("currentMuscleKingLabel")
     if not mkLabel or not mkLabel:IsA("TextLabel") then return false end
-    return mkLabel.Text == "Muscle King: " .. player.Name
+    -- Check Display Name instead of username
+    return mkLabel.Text == "Muscle King: " .. player.DisplayName
 end
 
 local function isMuscleKingNone()
@@ -333,48 +336,6 @@ local function findBestSeat(nearPos)
         end
     end
 
-    if bestDist > 15 then
-        for _, obj in ipairs(folder:GetDescendants()) do
-            if obj:IsA("BasePart") then
-                local n = obj.Name:lower()
-                if n:find("interact") or n:find("trigger") or n:find("prompt") or n == "root" then
-                    local dist = (obj.Position - nearPos).Magnitude
-                    if dist < bestDist and dist < 30 then
-                        bestDist = dist
-                        bestPart = obj
-                    end
-                end
-            end
-        end
-    end
-
-    if bestDist > 15 then
-        for _, model in ipairs(folder:GetChildren()) do
-            if model:IsA("Model") then
-                local ref = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
-                if ref then
-                    local dist = (ref.Position - nearPos).Magnitude
-                    if dist < bestDist and dist < 30 then
-                        bestDist = dist
-                        bestPart = ref
-                    end
-                end
-            end
-        end
-    end
-
-    if not bestPart then
-        for _, obj in ipairs(folder:GetDescendants()) do
-            if obj:IsA("BasePart") then
-                local dist = (obj.Position - nearPos).Magnitude
-                if dist < bestDist and dist < 20 then
-                    bestDist = dist
-                    bestPart = obj
-                end
-            end
-        end
-    end
-
     return bestPart
 end
 
@@ -399,9 +360,7 @@ local function startAutoGym()
     states.autoGym = true
 
     local lastTpTime   = 0
-    local lastFireTime = 0
     local TP_CD        = 0.5
-    local FIRE_CD      = 0.15
 
     states.autoGymThread = task.spawn(function()
         while states.autoGym and states.selectedMap and states.selectedGym do
@@ -436,30 +395,22 @@ local function startAutoGym()
                 lastTpTime = now
             end
 
-            if now - lastFireTime >= FIRE_CD then
-                local seat = findBestSeat(gym.pos)
-                if seat then
-                    fireMachineInteract(seat)
-                end
-                fireEKey()
-                lastFireTime = now
+            -- Find seat and fire machine interact if seat found, DON'T fire E key
+            local seat = findBestSeat(gym.pos)
+            if seat then
+                fireMachineInteract(seat)
+                -- Do NOT fire E key when seat is found
             end
         end
         states.autoGym = false
     end)
 end
 
--- ==================== AUTO TREADMILL SECTION (FIXED - using Humanoid:Move) ====================
+-- ==================== AUTO TREADMILL SECTION (UPDATED - Uses W Key/Humanoid:Move) ====================
 local function stopAutoTreadmill()
     if states.autoTreadmillThread then
         pcall(task.cancel, states.autoTreadmillThread)
         states.autoTreadmillThread = nil
-    end
-    -- Stop walking when auto treadmill turns off
-    local char = player.Character
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    if hum then
-        hum:Move(Vector3.new(0, 0, 0), false)
     end
     states.autoTreadmill = false
 end
@@ -471,6 +422,7 @@ local function startAutoTreadmill()
 
     states.autoTreadmillThread = task.spawn(function()
         while states.autoTreadmill and states.selectedTreadmill do
+            task.wait()
             if states.stopEverything then continue end
 
             local treadmill = treadmillData[states.selectedTreadmill]
@@ -479,7 +431,7 @@ local function startAutoTreadmill()
             local char = player.Character
             if not char then continue end
             local root = char:FindFirstChild("HumanoidRootPart")
-            local hum = char:FindFirstChildOfClass("Humanoid")
+            local hum  = char:FindFirstChild("Humanoid")
             if not root or not hum or hum.Health <= 0 then continue end
 
             if hum.Sit then continue end
@@ -490,23 +442,9 @@ local function startAutoTreadmill()
                 root.AssemblyLinearVelocity = Vector3.zero
             end)
 
-            -- Make character walk forward using Humanoid:Move (as you showed)
+            -- Use Humanoid:Move() for both PC and mobile (no seat interaction)
+            -- Move in the direction the camera is facing (forward)
             hum:Move(Vector3.new(0, 0, -1), true)
-
-            -- Interact with treadmill seat and press E
-            local seat = findBestSeat(treadmill.pos)
-            if seat then
-                fireMachineInteract(seat)
-            end
-            fireEKey()
-
-            task.wait()
-        end
-        -- Stop walking when loop ends
-        local char = player.Character
-        local hum = char and char:FindFirstChildOfClass("Humanoid")
-        if hum then
-            hum:Move(Vector3.new(0, 0, 0), false)
         end
         states.autoTreadmill = false
     end)
@@ -560,6 +498,44 @@ local function startAutoAuraBuy()
             task.wait(0.8)
         end
     end)
+end
+
+-- ==================== LEADERBOARD FUNCTIONS ====================
+local function checkAllPlayersStrength()
+    local leaderboardData = {}
+    local players = Players:GetPlayers()
+    
+    for _, plr in ipairs(players) do
+        local strength = 0
+        local rebirth = 0
+        local durability = 0
+        
+        if plr.leaderstats then
+            local strStat = plr.leaderstats:FindFirstChild("Strength")
+            if strStat then strength = strStat.Value end
+            
+            local rebStat = plr.leaderstats:FindFirstChild("Rebirths")
+            if rebStat then rebirth = rebStat.Value end
+            
+            local durStat = plr.leaderstats:FindFirstChild("Durability")
+            if durStat then durability = durStat.Value end
+        end
+        
+        table.insert(leaderboardData, {
+            name = plr.DisplayName .. " (@" .. plr.Name .. ")",
+            strength = strength,
+            rebirth = rebirth,
+            durability = durability
+        })
+    end
+    
+    -- Sort by strength highest to lowest
+    table.sort(leaderboardData, function(a, b)
+        return a.strength > b.strength
+    end)
+    
+    states.leaderboardData = leaderboardData
+    return leaderboardData
 end
 
 -- ==================== UI FRAMEWORK ====================
@@ -654,7 +630,7 @@ else
 end
 
 local frames = {}
-local tabs = {"Auto Farm", "Farm", "Killer", "Stats", "Auto Gym", "Auto Treadmill", "Auto Crystal", "Glitchable Rebirth", "Calculator", "Teleport", "Config"}
+local tabs = {"Auto Farm", "Farm", "Killer", "Stats", "Auto Gym", "Auto Treadmill", "Auto Crystal", "Glitchable Rebirth", "Calculator", "Teleport", "Leaderboard", "Config"}
 
 if isMobile then
     SidebarScroll.CanvasSize = UDim2.new(0, #tabs * 75, 0, 0)
@@ -1461,8 +1437,8 @@ gymBtn.MouseButton1Click:Connect(function()
             local seat = findBestSeat(gym.pos)
             if seat then
                 fireMachineInteract(seat)
+                -- Don't fire E key when seat found
             end
-            fireEKey()
             task.wait()
         end
     end)
@@ -1478,7 +1454,7 @@ local autoGymBtn = createToggle(f5, "Auto Gym", "autoGym", function(val)
     return val
 end)
 
--- ==================== TAB 6: AUTO TREADMILL (UPDATED) ====================
+-- ==================== TAB 6: AUTO TREADMILL (UPDATED - Uses W Key/Humanoid:Move, no seat) ====================
 local f6 = frames["Auto Treadmill"]
 
 local treadmillOptions = {}
@@ -1495,8 +1471,6 @@ local treadmillDD = createDropdown(f6, "Select Treadmill", treadmillOptions, fal
         states.selectedTreadmill = nil
     end
 end)
-
--- "Go to Treadmill" button removed as requested
 
 local autoTreadmillBtn = createToggle(f6, "Auto Treadmill", "autoTreadmill", function(val)
     if val then
@@ -1930,7 +1904,124 @@ for _, tpData in ipairs(teleportList) do
     end)
 end
 
--- ==================== TAB 11: CONFIG ====================
+-- ==================== TAB 11: LEADERBOARD ====================
+local f_leaderboard = frames["Leaderboard"]
+
+local leaderboardTitle = Instance.new("TextLabel", f_leaderboard)
+leaderboardTitle.Size = UDim2.new(1, -10, 0, 25)
+leaderboardTitle.BackgroundTransparency = 1
+leaderboardTitle.Text = "--- LEADERBOARD ---"
+leaderboardTitle.TextColor3 = Color3.fromRGB(255, 215, 0)
+leaderboardTitle.Font = Enum.Font.GothamBold
+leaderboardTitle.TextSize = 16
+leaderboardTitle.TextXAlignment = Enum.TextXAlignment.Center
+
+local checkStrengthBtn = Instance.new("TextButton", f_leaderboard)
+checkStrengthBtn.Size = UDim2.new(1, -10, 0, 40)
+checkStrengthBtn.BackgroundColor3 = Color3.fromRGB(60, 100, 60)
+checkStrengthBtn.Text = "Check All Players Strength"
+checkStrengthBtn.TextColor3 = Color3.new(1, 1, 1)
+checkStrengthBtn.Font = Enum.Font.GothamBold
+checkStrengthBtn.TextSize = 14
+checkStrengthBtn.MouseButton1Click:Connect(function()
+    checkAllPlayersStrength()
+    -- Update the leaderboard display
+    updateLeaderboardDisplay()
+end)
+
+local leaderboardScrollingFrame = Instance.new("ScrollingFrame", f_leaderboard)
+leaderboardScrollingFrame.Size = UDim2.new(1, -10, 0, 300)
+leaderboardScrollingFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+leaderboardScrollingFrame.ScrollBarThickness = isMobile and 6 or 4
+leaderboardScrollingFrame.ScrollingEnabled = true
+leaderboardScrollingFrame.ClipsDescendants = true
+leaderboardScrollingFrame.ElasticBehavior = Enum.ElasticBehavior.WhenScrollable
+leaderboardScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+
+local leaderboardLayout = Instance.new("UIListLayout", leaderboardScrollingFrame)
+leaderboardLayout.Padding = UDim.new(0, 2)
+leaderboardLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+function updateLeaderboardDisplay()
+    -- Clear existing entries
+    for _, child in ipairs(leaderboardScrollingFrame:GetChildren()) do
+        if child:IsA("TextLabel") or child:IsA("Frame") then
+            child:Destroy()
+        end
+    end
+    
+    local data = states.leaderboardData
+    if not data or #data == 0 then
+        local noDataLabel = Instance.new("TextLabel", leaderboardScrollingFrame)
+        noDataLabel.Size = UDim2.new(1, 0, 0, 30)
+        noDataLabel.BackgroundTransparency = 1
+        noDataLabel.Text = "No data available. Click 'Check All Players Strength'"
+        noDataLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+        noDataLabel.TextSize = 12
+        leaderboardScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 35)
+        return
+    end
+    
+    local rank = 1
+    for _, entry in ipairs(data) do
+        local isLocalPlayer = entry.name == player.DisplayName .. " (@" .. player.Name .. ")"
+        
+        local entryFrame = Instance.new("Frame", leaderboardScrollingFrame)
+        entryFrame.Size = UDim2.new(1, -4, 0, 45)
+        entryFrame.BackgroundColor3 = isLocalPlayer and Color3.fromRGB(60, 80, 40) or Color3.fromRGB(40, 40, 40)
+        entryFrame.BorderSizePixel = 0
+        Instance.new("UICorner", entryFrame).CornerRadius = UDim.new(0, 4)
+        
+        local rankLabel = Instance.new("TextLabel", entryFrame)
+        rankLabel.Size = UDim2.new(0, 40, 1, 0)
+        rankLabel.Position = UDim2.fromOffset(5, 0)
+        rankLabel.BackgroundTransparency = 1
+        rankLabel.Text = "#" .. rank
+        rankLabel.TextColor3 = Color3.fromRGB(255, 200, 50)
+        rankLabel.Font = Enum.Font.GothamBold
+        rankLabel.TextSize = 14
+        rankLabel.TextXAlignment = Enum.TextXAlignment.Left
+        
+        local nameLabel = Instance.new("TextLabel", entryFrame)
+        nameLabel.Size = UDim2.new(0, 180, 0, 20)
+        nameLabel.Position = UDim2.fromOffset(50, 2)
+        nameLabel.BackgroundTransparency = 1
+        nameLabel.Text = entry.name
+        nameLabel.TextColor3 = isLocalPlayer and Color3.new(0, 255, 100) or Color3.new(1, 1, 1)
+        nameLabel.Font = Enum.Font.Gotham
+        nameLabel.TextSize = 11
+        nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+        nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
+        
+        local strengthLabel = Instance.new("TextLabel", entryFrame)
+        strengthLabel.Size = UDim2.new(1, -55, 0, 20)
+        strengthLabel.Position = UDim2.fromOffset(50, 22)
+        strengthLabel.BackgroundTransparency = 1
+        strengthLabel.Text = "Strength: " .. formatNum(entry.strength) .. " | Rebirth: " .. formatNum(entry.rebirth) .. " | Durability: " .. formatNum(entry.durability)
+        strengthLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+        strengthLabel.Font = Enum.Font.Gotham
+        strengthLabel.TextSize = 10
+        strengthLabel.TextXAlignment = Enum.TextXAlignment.Left
+        
+        rank = rank + 1
+    end
+    
+    leaderboardScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, #data * 47 + 5)
+end
+
+-- Auto-refresh leaderboard every 10 seconds if data exists
+table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
+    while true do
+        task.wait(10)
+        if states.stopEverything then continue end
+        if frames["Leaderboard"].Visible and #states.leaderboardData > 0 then
+            checkAllPlayersStrength()
+            updateLeaderboardDisplay()
+        end
+    end
+end))
+
+-- ==================== TAB 12: CONFIG ====================
 local f11 = frames["Config"]
 
 local configFilePath = "ML_Expert_Configs.json"
@@ -2691,6 +2782,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         for _, p in ipairs(Players:GetPlayers()) do 
             local dName = p.DisplayName .. " (@" .. p.Name .. ")"
             currentMap[dName] = p.Name
+            displayNameMap[p.Name] = p.DisplayName
             table.insert(statsList, dName)
             if p ~= player then
                 table.insert(killList, dName)
