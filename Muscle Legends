@@ -1459,10 +1459,11 @@ end)
 local f6 = frames["Auto Treadmill"]
 
 local treadmillOptions = {}
+-- Use the exact order from treadmillData (no alphabetical sort)
 for name, data in pairs(treadmillData) do
     table.insert(treadmillOptions, name .. " (+" .. data.exp .. " EXP)")
 end
-table.sort(treadmillOptions)
+-- No table.sort(treadmillOptions) – keep original insertion order
 
 local treadmillDD = createDropdown(f6, "Select Treadmill", treadmillOptions, false, function(display)
     local realName = display:match("^(.-) %(")
@@ -1696,10 +1697,15 @@ createCrystalSection(f7, "--- AURAS ---", auraList, "selectedAuraCrystalData", "
 local f8 = frames["Glitchable Rebirth"]
 
 local glitchRockOptions = {}
-for name, data in pairs(rockData) do
-    table.insert(glitchRockOptions, name .. " (Glitch Value: " .. data.glitchValue .. ")")
+-- Use ordered list to preserve the original rock order
+local rockOrder = {"Tiny Rock", "Punching Rock", "Large Rock", "Golden Rock", "Frozen Rock", "Mystic Rock", "Inferno Rock", "Legend Rock", "Muscle King Rock", "Jungle Rock"}
+for _, rockName in ipairs(rockOrder) do
+    local data = rockData[rockName]
+    if data then
+        table.insert(glitchRockOptions, rockName .. " (Glitch Value: " .. data.glitchValue .. ")")
+    end
 end
-table.sort(glitchRockOptions)
+-- No table.sort(glitchRockOptions) – keep defined order
 
 local selectedGlitchRock = nil
 local expGivesResult = nil
