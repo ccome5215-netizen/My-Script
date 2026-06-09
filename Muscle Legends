@@ -1,3 +1,4 @@
+
 getgenv().ML_Expert_UI = nil
 getgenv().ML_Expert_Loops = nil
 
@@ -301,7 +302,6 @@ local function isLocalPlayerMuscleKing()
     if not mkGui then return false end
     local mkLabel = mkGui:FindFirstChild("currentMuscleKingLabel")
     if not mkLabel or not mkLabel:IsA("TextLabel") then return false end
-    -- Check Display Name instead of username
     return mkLabel.Text == "Muscle King: " .. player.DisplayName
 end
 
@@ -395,18 +395,16 @@ local function startAutoGym()
                 lastTpTime = now
             end
 
-            -- Find seat and fire machine interact if seat found, DON'T fire E key
             local seat = findBestSeat(gym.pos)
             if seat then
                 fireMachineInteract(seat)
-                -- Do NOT fire E key when seat is found
             end
         end
         states.autoGym = false
     end)
 end
 
--- ==================== AUTO TREADMILL SECTION (UPDATED - Uses W Key/Humanoid:Move) ====================
+-- ==================== AUTO TREADMILL SECTION ====================
 local function stopAutoTreadmill()
     if states.autoTreadmillThread then
         pcall(task.cancel, states.autoTreadmillThread)
@@ -436,14 +434,11 @@ local function startAutoTreadmill()
 
             if hum.Sit then continue end
 
-            -- Teleport to treadmill position
             pcall(function()
                 root.CFrame = CFrame.new(treadmill.pos + Vector3.new(0, 4, 0))
                 root.AssemblyLinearVelocity = Vector3.zero
             end)
 
-            -- Use Humanoid:Move() for both PC and mobile (no seat interaction)
-            -- Move in the direction the camera is facing (forward)
             hum:Move(Vector3.new(0, 0, -1), true)
         end
         states.autoTreadmill = false
@@ -518,7 +513,6 @@ local function checkAllPlayersStrength()
             if rebStat then rebirth = rebStat.Value end
         end
         
-        -- Fix: Durability is a direct child of player, not in leaderstats
         local durStat = plr:FindFirstChild("Durability")
         if durStat then durability = durStat.Value end
         
@@ -530,7 +524,6 @@ local function checkAllPlayersStrength()
         })
     end
     
-    -- Sort by strength highest to lowest
     table.sort(leaderboardData, function(a, b)
         return a.strength > b.strength
     end)
@@ -1438,7 +1431,6 @@ gymBtn.MouseButton1Click:Connect(function()
             local seat = findBestSeat(gym.pos)
             if seat then
                 fireMachineInteract(seat)
-                -- Don't fire E key when seat found
             end
             task.wait()
         end
@@ -1455,15 +1447,28 @@ local autoGymBtn = createToggle(f5, "Auto Gym", "autoGym", function(val)
     return val
 end)
 
--- ==================== TAB 6: AUTO TREADMILL (UPDATED - Uses W Key/Humanoid:Move, no seat) ====================
+-- ==================== TAB 6: AUTO TREADMILL ====================
 local f6 = frames["Auto Treadmill"]
 
+-- Ordered list to guarantee clean display order (EXP 1 → 8)
+local treadmillOrder = {
+    "Tiny Treadmill",
+    "Small Treadmill",
+    "Medium Treadmill",
+    "Large Treadmill",
+    "Big Treadmill",
+    "Mystic Treadmill",
+    "Legend Treadmill",
+    "Jungle Treadmill"
+}
+
 local treadmillOptions = {}
--- Use the exact order from treadmillData (no alphabetical sort)
-for name, data in pairs(treadmillData) do
-    table.insert(treadmillOptions, name .. " (+" .. data.exp .. " EXP)")
+for _, name in ipairs(treadmillOrder) do
+    local data = treadmillData[name]
+    if data then
+        table.insert(treadmillOptions, name .. " (+" .. data.exp .. " EXP)")
+    end
 end
--- No table.sort(treadmillOptions) – keep original insertion order
 
 local treadmillDD = createDropdown(f6, "Select Treadmill", treadmillOptions, false, function(display)
     local realName = display:match("^(.-) %(")
@@ -1697,7 +1702,6 @@ createCrystalSection(f7, "--- AURAS ---", auraList, "selectedAuraCrystalData", "
 local f8 = frames["Glitchable Rebirth"]
 
 local glitchRockOptions = {}
--- Use ordered list to preserve the original rock order
 local rockOrder = {"Tiny Rock", "Punching Rock", "Large Rock", "Golden Rock", "Frozen Rock", "Mystic Rock", "Inferno Rock", "Legend Rock", "Muscle King Rock", "Jungle Rock"}
 for _, rockName in ipairs(rockOrder) do
     local data = rockData[rockName]
@@ -1705,7 +1709,6 @@ for _, rockName in ipairs(rockOrder) do
         table.insert(glitchRockOptions, rockName .. " (Glitch Value: " .. data.glitchValue .. ")")
     end
 end
--- No table.sort(glitchRockOptions) – keep defined order
 
 local selectedGlitchRock = nil
 local expGivesResult = nil
@@ -1932,7 +1935,6 @@ checkStrengthBtn.Font = Enum.Font.GothamBold
 checkStrengthBtn.TextSize = 14
 checkStrengthBtn.MouseButton1Click:Connect(function()
     checkAllPlayersStrength()
-    -- Update the leaderboard display
     updateLeaderboardDisplay()
 end)
 
@@ -1950,7 +1952,6 @@ leaderboardLayout.Padding = UDim.new(0, 2)
 leaderboardLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
 function updateLeaderboardDisplay()
-    -- Clear existing entries
     for _, child in ipairs(leaderboardScrollingFrame:GetChildren()) do
         if child:IsA("TextLabel") or child:IsA("Frame") then
             child:Destroy()
@@ -2000,7 +2001,6 @@ function updateLeaderboardDisplay()
         nameLabel.TextXAlignment = Enum.TextXAlignment.Left
         nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
         
-        -- Custom rebirth display: no formatting unless >= 1 million
         local rebirthDisplay
         if entry.rebirth >= 1000000 then
             rebirthDisplay = formatNum(entry.rebirth)
@@ -2024,7 +2024,6 @@ function updateLeaderboardDisplay()
     leaderboardScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, #data * 47 + 5)
 end
 
--- Auto-refresh leaderboard every 10 seconds if data exists
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         task.wait(10)
@@ -2252,7 +2251,7 @@ loadBtn.MouseButton1Click:Connect(function()
                 dropdownSetters["selectGym"].setValue(gymDisplayName)
             end
         end
-        if s.selectedTreadmill then
+        if s.selectedTreadmill and treadmillData[s.selectedTreadmill] then
             local display = s.selectedTreadmill .. " (+" .. treadmillData[s.selectedTreadmill].exp .. " EXP)"
             treadmillDD.setValue(display)
         end
