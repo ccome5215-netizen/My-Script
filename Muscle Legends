@@ -1,4 +1,3 @@
-
 getgenv().ML_Expert_UI = nil
 getgenv().ML_Expert_Loops = nil
 
@@ -74,7 +73,9 @@ local states = {
     stopEverything = false,
     walkOnWater = true,
     selectedTreadmill = nil, autoTreadmill = false, autoTreadmillThread = nil,
-    leaderboardData = {}
+    leaderboardData = {},
+    killSystemActive = false,        -- new: overall kill system state
+    victimData = {}                  -- new: stores victim info for attachment/position restore
 }
 
 local rockCache = {}
@@ -90,6 +91,107 @@ local toggleButtons = {}
 local dropdownSetters = {}
 local dropdownHeaderSetters = {}
 
+-- ==================== KILLER ATTACHMENT HANDLING ====================
+-- Disable all welds/motor6d for a character
+local function disableAttachments(char)
+    if not char then return {} end
+    local disabled = {}
+    for _, obj in ipairs(char:GetDescendants()) do
+        if obj:IsA("Motor6D") or obj:IsA("Weld") or obj:IsA("WeldConstraint") then
+            if obj.Enabled then
+                obj.Enabled = false
+                table.insert(disabled, obj)
+            elseif obj.Parent then
+                -- For WeldConstraint, we can set Part1 to nil temporarily
+                if obj:IsA("WeldConstraint") and obj.Part1 then
+                    local part1 = obj.Part1
+                    obj.Part1 = nil
+                    table.insert(disabled, {obj = obj, part1 = part1})
+                else
+                    table.insert(disabled, obj)
+                end
+            end
+        end
+    end
+    return disabled
+end
+
+-- Restore previously disabled attachments
+local function restoreAttachments(disabledList)
+    for _, item in ipairs(disabledList) do
+        if type(item) == "table" and item.obj and item.part1 then
+            item.obj.Part1 = item.part1
+        elseif item:IsA("Motor6D") or item:IsA("Weld") then
+            pcall(function() item.Enabled = true end)
+        elseif item:IsA("WeldConstraint") then
+            pcall(function() item.Enabled = true end)
+        end
+    end
+end
+
+-- Store victim's original state and disable attachments
+local function prepareVictim(victim)
+    if not victim or not victim.Character or not victim.Character.Parent then return nil end
+    local char = victim.Character
+    local rootPart = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
+    if not rootPart then return nil end
+    local originalCFrame = rootPart.CFrame
+    local disabledAttachments = disableAttachments(char)
+    states.victimData[victim] = {
+        originalCFrame = originalCFrame,
+        attachments = disabledAttachments,
+        character = char
+    }
+    return states.victimData[victim]
+end
+
+-- Restore victim's attachments and position, then remove from tracking
+local function restoreVictim(victim)
+    local data = states.victimData[victim]
+    if not data then return end
+    if data.attachments then
+        restoreAttachments(data.attachments)
+    end
+    if data.originalCFrame and data.character and data.character.Parent then
+        local root = data.character:FindFirstChild("HumanoidRootPart") or data.character:FindFirstChild("Torso") or data.character:FindFirstChild("UpperTorso")
+        if root then
+            pcall(function()
+                root.CFrame = data.originalCFrame
+                root.AssemblyLinearVelocity = Vector3.zero
+                root.AssemblyAngularVelocity = Vector3.zero
+            end)
+        end
+    end
+    states.victimData[victim] = nil
+end
+
+-- Restore all victims when kill system is disabled
+local function restoreAllVictims()
+    for victim, _ in pairs(states.victimData) do
+        restoreVictim(victim)
+    end
+    states.victimData = {}
+end
+
+-- Update kill system active flag and handle attachment state
+local function updateKillSystemActive()
+    local newActive = states.killActive or states.killEveryone or states.autoGoodKarma or states.autoEvilKarma
+    if newActive == states.killSystemActive then return end
+    states.killSystemActive = newActive
+    if not newActive then
+        restoreAllVictims()
+    end
+end
+
+-- Override the toggle callbacks to call updateKillSystemActive
+local oldKillActive = states.killActive
+local oldKillEveryone = states.killEveryone
+local oldAutoGoodKarma = states.autoGoodKarma
+local oldAutoEvilKarma = states.autoEvilKarma
+
+-- We'll modify the toggles after UI creation, but we'll also patch the update in the loop
+
+-- ==================== ROCK DATA ====================
 local rockData = {
     ["Tiny Rock"]        = {req = 0,       name = "Tiny Rock",           idx = 1, glitchValue = 0.025},
     ["Punching Rock"]    = {req = 10,      name = "Punching Rock",       idx = 1, glitchValue = 0.05},
@@ -698,6 +800,10 @@ local function createToggle(parent, text, key, callback)
         local newState = not state
         if callback(newState) == false then newState = false end 
         SetToggle[btn](newState)
+        -- after toggling, update kill system active state
+        if key == "kill" or key == "killEveryone" or key == "autoGoodKarma" or key == "autoEvilKarma" then
+            updateKillSystemActive()
+        end
     end)
     return btn
 end
@@ -1178,10 +1284,10 @@ local pKillDD = createDropdown(f3, "Player Dropdown", {}, true, function(label) 
 local whiteDD = createDropdown(f3, "Whitelist Dropdown", {}, true, function(label) local realName = nameMap[label] or label; if states.whitelist[realName] then states.whitelist[realName] = nil; return false else states.whitelist[realName] = true; return true end end, function(label) local r = nameMap[label] or label; return states.whitelist[r] end)
 
 createToggle(f3, "Whitelist Friends", nil, function(val) states.whitelistFriends = val; for _, p in ipairs(Players:GetPlayers()) do if p ~= player and player:IsFriendsWith(p.UserId) then if val then states.whitelist[p.Name] = true else states.whitelist[p.Name] = nil end end end end)
-createToggle(f3, "Kill", nil, function(v) states.killActive = v; if v then updateVisibility(true) else checkResetKillAttackTime() end end)
-createToggle(f3, "Kill Everyone", nil, function(v) states.killEveryone = v; if v then updateVisibility(true) else checkResetKillAttackTime() end end)
-createToggle(f3, "Auto Good Karma", nil, function(v) states.autoGoodKarma = v; if v then updateVisibility(true) else checkResetKillAttackTime() end end)
-createToggle(f3, "Auto Evil Karma", nil, function(v) states.autoEvilKarma = v; if v then updateVisibility(true) else checkResetKillAttackTime() end end)
+createToggle(f3, "Kill", "kill", function(v) states.killActive = v; if v then updateVisibility(true) else checkResetKillAttackTime() end; updateKillSystemActive() return v end)
+createToggle(f3, "Kill Everyone", "killEveryone", function(v) states.killEveryone = v; if v then updateVisibility(true) else checkResetKillAttackTime() end; updateKillSystemActive() return v end)
+createToggle(f3, "Auto Good Karma", "autoGoodKarma", function(v) states.autoGoodKarma = v; if v then updateVisibility(true) else checkResetKillAttackTime() end; updateKillSystemActive() return v end)
+createToggle(f3, "Auto Evil Karma", "autoEvilKarma", function(v) states.autoEvilKarma = v; if v then updateVisibility(true) else checkResetKillAttackTime() end; updateKillSystemActive() return v end)
 
 -- ==================== TAB 4: STATS & INVENTORY (LIVE UPDATE) ====================
 local f4 = frames["Stats"]
@@ -2619,6 +2725,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
+-- ==================== MODIFIED KILLER LOOP (WITH ATTACHMENT HANDLING) ====================
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
@@ -2628,8 +2735,11 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         local root, hum = char:FindFirstChild("HumanoidRootPart"), char:FindFirstChild("Humanoid")
         if not root or not hum or hum.Health <= 0 then continue end
 
-        local anyKillActive = states.killActive or states.killEveryone or states.autoGoodKarma or states.autoEvilKarma
-        if anyKillActive then
+        -- Update kill system active status
+        updateKillSystemActive()
+
+        -- Only perform killing if the system is active
+        if states.killSystemActive then
             local myRightHand = char:FindFirstChild("RightHand") or char:FindFirstChild("Right Arm")
             if myRightHand then 
                 for _, p in ipairs(Players:GetPlayers()) do 
@@ -2642,6 +2752,11 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                         end
                         
                         if shouldKill and not states.whitelist[p.Name] then 
+                            -- Prepare victim: disable attachments and store original position if not already prepared
+                            if not states.victimData[p] then
+                                prepareVictim(p)
+                            end
+                            
                             local victimHead = p.Character:FindFirstChild("Head")
                             if victimHead then
                                 pcall(function()
@@ -2661,6 +2776,14 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
+-- Clean up victim data when a player leaves
+Players.PlayerRemoving:Connect(function(plr)
+    if states.victimData[plr] then
+        restoreVictim(plr)
+    end
+end)
+
+-- ==================== OTHER LOOPS (Unchanged) ====================
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function() 
     while true do 
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
@@ -2869,6 +2992,7 @@ local function onUnload()
             rock.Anchored = data.Anchored
         end
     end
+    restoreAllVictims()  -- restore all victims on script unload
 end
 task.spawn(function()
     while true do
