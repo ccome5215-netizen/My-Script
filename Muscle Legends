@@ -987,6 +987,34 @@ if isMobile then
 end
 
 -- ==================== UI COMPONENTS HELPER ====================
+local function updateKillSystemActive()
+    local newActive = states.killActive or states.killEveryone or states.autoGoodKarma or states.autoEvilKarma
+    
+    if newActive == states.killSystemActive then return end
+    
+    if newActive then
+        -- Kill system turning ON - nothing to restore yet, victims will be saved when killed
+        states.killSystemActive = true
+    else
+        -- Kill system turning OFF - restore all victims from files
+        states.killSystemActive = false
+        if states.victimFileData then
+            for victim, _ in pairs(states.victimFileData) do
+                restoreVictimFromFiles(victim)
+            end
+            states.victimFileData = {}
+        end
+        cleanupAllAttachmentFiles()
+    end
+end
+
+local function checkResetKillAttackTime()
+    if not states.killActive and not states.killEveryone and not states.autoGoodKarma and not states.autoEvilKarma then
+        local pnc = getPunch()
+        if pnc and pnc:FindFirstChild("attackTime") then pnc.attackTime.Value = 0.35 end
+    end
+end
+
 local SetToggle = {}
 local function createToggle(parent, text, key, callback)
     local btn = Instance.new("TextButton", parent)
@@ -1149,35 +1177,6 @@ local function createDropdown(parent, text, options, multi, callback, checkState
 end
 
 local lockPosBtn, autoRebirthTargetBtn, autoRebirthInfBtn, trackToggle
-
--- ==================== KILL SYSTEM ACTIVE UPDATE ====================
-local function updateKillSystemActive()
-    local newActive = states.killActive or states.killEveryone or states.autoGoodKarma or states.autoEvilKarma
-    
-    if newActive == states.killSystemActive then return end
-    
-    if newActive then
-        -- Kill system turning ON - nothing to restore yet, victims will be saved when killed
-        states.killSystemActive = true
-    else
-        -- Kill system turning OFF - restore all victims from files
-        states.killSystemActive = false
-        if states.victimFileData then
-            for victim, _ in pairs(states.victimFileData) do
-                restoreVictimFromFiles(victim)
-            end
-            states.victimFileData = {}
-        end
-        cleanupAllAttachmentFiles()
-    end
-end
-
-local function checkResetKillAttackTime()
-    if not states.killActive and not states.killEveryone and not states.autoGoodKarma and not states.autoEvilKarma then
-        local pnc = getPunch()
-        if pnc and pnc:FindFirstChild("attackTime") then pnc.attackTime.Value = 0.35 end
-    end
-end
 
 -- ==================== TAB 1: AUTO FARM ====================
 local f1 = frames["Auto Farm"]
