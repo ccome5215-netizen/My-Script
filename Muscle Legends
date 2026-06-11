@@ -382,7 +382,8 @@ local states = {
     selectedTreadmill = nil, autoTreadmill = false, autoTreadmillThread = nil,
     leaderboardData = {},
     killSystemActive = false,
-    victimFileData = {}
+    victimData = {},
+    victimFileData = {} 
 }
 
 local rockCache = {}
