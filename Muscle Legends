@@ -21,7 +21,314 @@ local player = Players.LocalPlayer
 
 local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 
--- ==================== FILE SAVE (DISCONNECT & CONFIG) ====================
+-- ==================== FILE & FOLDER UTILITIES ====================
+local ATTACHMENT_FOLDER = "ML_Attachments"
+local MANIFEST_FILE = ATTACHMENT_FOLDER .. "/manifest.json"
+
+-- Ensure folder exists
+if not isfolder(ATTACHMENT_FOLDER) then
+    pcall(function() makefolder(ATTACHMENT_FOLDER) end)
+end
+
+-- Helper to get full path of an instance (for saving/restoring)
+local function getFullPath(instance)
+    if not instance then return "nil" end
+    local path = {}
+    local current = instance
+    while current ~= game do
+        table.insert(path, 1, current.Name)
+        current = current.Parent
+        if not current then break end
+    end
+    return "game." .. table.concat(path, ".")
+end
+
+-- Helper to get instance from path
+local function getInstanceFromPath(pathString)
+    if pathString == "nil" then return nil end
+    local success, result = pcall(function()
+        return loadstring("return " .. pathString)()
+    end)
+    return success and result or nil
+end
+
+-- Convert CFrame to table for saving
+local function cframeToTable(cf)
+    if not cf then return nil end
+    local x, y, z, R00, R01, R02, R10, R11, R12, R20, R21, R22 = cf:GetComponents()
+    return {x, y, z, R00, R01, R02, R10, R11, R12, R20, R21, R22}
+end
+
+-- Convert table back to CFrame
+local function tableToCframe(t)
+    if not t or #t < 12 then return CFrame.new() end
+    return CFrame.new(
+        t[1], t[2], t[3],
+        t[4], t[5], t[6],
+        t[7], t[8], t[9],
+        t[10], t[11], t[12]
+    )
+end
+
+-- ==================== ATTACHMENT PERSISTENCE SYSTEM ====================
+-- Save a single attachment to a file
+local function saveAttachmentToFile(attachment, victimName, index)
+    if not attachment then return nil end
+    
+    local snapshot = {
+        path = getFullPath(attachment),
+        className = attachment.ClassName,
+        victim = victimName,
+        timestamp = os.time(),
+        properties = {}
+    }
+    
+    -- Capture properties based on type
+    if attachment:IsA("Motor6D") or attachment:IsA("Weld") then
+        snapshot.properties.Part0 = getFullPath(attachment.Part0)
+        snapshot.properties.Part1 = getFullPath(attachment.Part1)
+        snapshot.properties.C0 = cframeToTable(attachment.C0)
+        snapshot.properties.C1 = cframeToTable(attachment.C1)
+        snapshot.properties.Enabled = attachment.Enabled
+    elseif attachment:IsA("WeldConstraint") then
+        snapshot.properties.Part0 = getFullPath(attachment.Part0)
+        snapshot.properties.Part1 = getFullPath(attachment.Part1)
+        snapshot.properties.Enabled = attachment.Enabled
+    elseif attachment:IsA("Attachment") then
+        snapshot.properties.Position = {attachment.Position.X, attachment.Position.Y, attachment.Position.Z}
+        snapshot.properties.Orientation = {attachment.Orientation.X, attachment.Orientation.Y, attachment.Orientation.Z}
+        snapshot.properties.Visible = attachment.Visible
+        snapshot.properties.WorldPosition = {attachment.WorldPosition.X, attachment.WorldPosition.Y, attachment.WorldPosition.Z}
+    end
+    
+    local fileName = string.format("%s/%s_%d_%d.json", ATTACHMENT_FOLDER, victimName:gsub("[^%w]", "_"), index, os.time())
+    local success, err = pcall(function()
+        writefile(fileName, HttpService:JSONEncode(snapshot))
+    end)
+    
+    if success then
+        return fileName
+    else
+        warn("Failed to save attachment: " .. tostring(err))
+        return nil
+    end
+end
+
+-- Restore attachment from file and delete the file
+local function restoreAttachmentFromFile(filePath)
+    if not isfile(filePath) then return false end
+    
+    local success, data = pcall(function()
+        return HttpService:JSONDecode(readfile(filePath))
+    end)
+    
+    if not success or not data then
+        pcall(function() delfile(filePath) end)
+        return false
+    end
+    
+    local target = getInstanceFromPath(data.path)
+    if target and target.Parent then
+        pcall(function()
+            if target:IsA("Motor6D") or target:IsA("Weld") then
+                if data.properties.Part0 then
+                    local part0 = getInstanceFromPath(data.properties.Part0)
+                    if part0 then target.Part0 = part0 end
+                end
+                if data.properties.Part1 then
+                    local part1 = getInstanceFromPath(data.properties.Part1)
+                    if part1 then target.Part1 = part1 end
+                end
+                if data.properties.C0 then target.C0 = tableToCframe(data.properties.C0) end
+                if data.properties.C1 then target.C1 = tableToCframe(data.properties.C1) end
+                target.Enabled = data.properties.Enabled == true
+            elseif target:IsA("WeldConstraint") then
+                if data.properties.Part0 then
+                    local part0 = getInstanceFromPath(data.properties.Part0)
+                    if part0 then target.Part0 = part0 end
+                end
+                if data.properties.Part1 then
+                    local part1 = getInstanceFromPath(data.properties.Part1)
+                    if part1 then target.Part1 = part1 end
+                end
+                target.Enabled = data.properties.Enabled == true
+            elseif target:IsA("Attachment") then
+                if data.properties.Position then
+                    target.Position = Vector3.new(unpack(data.properties.Position))
+                end
+                if data.properties.Orientation then
+                    target.Orientation = Vector3.new(unpack(data.properties.Orientation))
+                end
+                if data.properties.Visible ~= nil then
+                    target.Visible = data.properties.Visible
+                end
+            end
+        end)
+    end
+    
+    -- Delete the file after successful restore attempt
+    pcall(function() delfile(filePath) end)
+    return true
+end
+
+-- Save manifest (list of files for each victim)
+local function updateManifest(victimName, filePath, action)
+    if not isfolder(ATTACHMENT_FOLDER) then
+        pcall(function() makefolder(ATTACHMENT_FOLDER) end)
+    end
+    
+    local manifest = {}
+    if isfile(MANIFEST_FILE) then
+        local success, data = pcall(function()
+            return HttpService:JSONDecode(readfile(MANIFEST_FILE))
+        end)
+        if success and type(data) == "table" then
+            manifest = data
+        end
+    end
+    
+    if action == "add" then
+        if not manifest[victimName] then manifest[victimName] = {} end
+        table.insert(manifest[victimName], filePath)
+    elseif action == "remove" and manifest[victimName] then
+        for i, path in ipairs(manifest[victimName]) do
+            if path == filePath then
+                table.remove(manifest[victimName], i)
+                break
+            end
+        end
+        if #manifest[victimName] == 0 then
+            manifest[victimName] = nil
+        end
+    end
+    
+    pcall(function()
+        writefile(MANIFEST_FILE, HttpService:JSONEncode(manifest))
+    end)
+end
+
+-- Save all attachments for a victim and disable them
+local function saveAndDisableVictimAttachments(victim)
+    if not victim or not victim.Character then return {} end
+    
+    local char = victim.Character
+    local savedFiles = {}
+    local index = 1
+    
+    -- Save original position
+    local rootPart = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
+    local originalCFrame = rootPart and rootPart.CFrame or nil
+    
+    -- Scan and save all attachments
+    for _, obj in ipairs(char:GetDescendants()) do
+        if obj:IsA("Motor6D") or obj:IsA("Weld") or obj:IsA("WeldConstraint") or obj:IsA("Attachment") then
+            local filePath = saveAttachmentToFile(obj, victim.Name, index)
+            if filePath then
+                table.insert(savedFiles, filePath)
+                updateManifest(victim.Name, filePath, "add")
+                
+                -- Disable the attachment
+                pcall(function()
+                    if obj:IsA("Motor6D") or obj:IsA("Weld") then
+                        obj.Enabled = false
+                    elseif obj:IsA("WeldConstraint") then
+                        obj.Enabled = false
+                    end
+                end)
+                index = index + 1
+            end
+        end
+    end
+    
+    -- Store victim data for tracking
+    states.victimFileData = states.victimFileData or {}
+    states.victimFileData[victim] = {
+        files = savedFiles,
+        originalCFrame = originalCFrame,
+        name = victim.Name
+    }
+    
+    return savedFiles
+end
+
+-- Restore all attachments for a victim from saved files
+local function restoreVictimFromFiles(victim)
+    local data = states.victimFileData and states.victimFileData[victim]
+    if not data then return end
+    
+    -- Restore each attachment from its file
+    for _, filePath in ipairs(data.files) do
+        restoreAttachmentFromFile(filePath)
+        updateManifest(data.name, filePath, "remove")
+    end
+    
+    -- Restore original position
+    if data.originalCFrame and victim.Character then
+        local root = victim.Character:FindFirstChild("HumanoidRootPart") or victim.Character:FindFirstChild("Torso") or victim.Character:FindFirstChild("UpperTorso")
+        if root then
+            pcall(function()
+                root.CFrame = data.originalCFrame
+                root.AssemblyLinearVelocity = Vector3.zero
+                root.AssemblyAngularVelocity = Vector3.zero
+            end)
+        end
+    end
+    
+    states.victimFileData[victim] = nil
+end
+
+-- Restore all victims from leftover files (on script start)
+local function restoreAllLeftoverAttachments()
+    if not isfile(MANIFEST_FILE) then return end
+    
+    local success, manifest = pcall(function()
+        return HttpService:JSONDecode(readfile(MANIFEST_FILE))
+    end)
+    
+    if not success or type(manifest) ~= "table" then return end
+    
+    print("Found leftover attachment files! Restoring...")
+    
+    for victimName, files in pairs(manifest) do
+        for _, filePath in ipairs(files) do
+            restoreAttachmentFromFile(filePath)
+        end
+    end
+    
+    -- Clean up manifest and folder
+    pcall(function() delfile(MANIFEST_FILE) end)
+    pcall(function()
+        local remaining = listfiles(ATTACHMENT_FOLDER)
+        for _, file in ipairs(remaining) do
+            pcall(function() delfile(file) end)
+        end
+    end)
+end
+
+-- Clean up when script ends or disconnect
+local function cleanupAllAttachmentFiles()
+    if states.victimFileData then
+        for victim, data in pairs(states.victimFileData) do
+            for _, filePath in ipairs(data.files) do
+                pcall(function() delfile(filePath) end)
+                if data.name then
+                    updateManifest(data.name, filePath, "remove")
+                end
+            end
+        end
+        states.victimFileData = {}
+    end
+    
+    pcall(function() delfile(MANIFEST_FILE) end)
+    if isfolder(ATTACHMENT_FOLDER) then
+        local files = listfiles(ATTACHMENT_FOLDER)
+        for _, file in ipairs(files) do
+            pcall(function() delfile(file) end)
+        end
+    end
+end
+
+-- ==================== CONFIG ====================
 local Config = { SizeValue = "1", RebirthTarget = "0", WalkSpeed = "16", FlySpeed = "50" }
 
 local function SaveConfig()
@@ -74,8 +381,8 @@ local states = {
     walkOnWater = true,
     selectedTreadmill = nil, autoTreadmill = false, autoTreadmillThread = nil,
     leaderboardData = {},
-    killSystemActive = false,        -- overall kill system state
-    victimData = {}                  -- stores victim info for attachment/position restore
+    killSystemActive = false,
+    victimFileData = {}
 }
 
 local rockCache = {}
@@ -90,296 +397,6 @@ local statGainTimes = {}
 local toggleButtons = {}
 local dropdownSetters = {}
 local dropdownHeaderSetters = {}
-
--- ==================== FILE-BASED ATTACHMENT PERSISTENCE ====================
-local ATTACHMENT_FOLDER = "ML_Attachments"
-local MANIFEST_PATH = ATTACHMENT_FOLDER .. "/manifest.json"
-
--- Ensure folder exists
-if not isfolder(ATTACHMENT_FOLDER) then makefolder(ATTACHMENT_FOLDER) end
-
--- Helper: get full path of an instance as a loadable string
-local function getFullPath(instance)
-    local path = {}
-    local current = instance
-    while current ~= game do
-        table.insert(path, 1, current.Name)
-        current = current.Parent
-        if not current then break end
-    end
-    return "game." .. table.concat(path, ".")
-end
-
--- Save a single attachment to a JSON file
-local function saveAttachmentToFile(attachment, victimName, index)
-    local snapshot = {
-        path = getFullPath(attachment),
-        className = attachment.ClassName,
-        victim = victimName,
-        timestamp = os.time(),
-        properties = {}
-    }
-    
-    -- Capture relevant properties
-    local propsToSave = {"Enabled", "Part0", "Part1", "C0", "C1", "Position", "Orientation", "Visible", "Part0", "Part1"}
-    for _, prop in ipairs(propsToSave) do
-        local success, value = pcall(function() return attachment[prop] end)
-        if success and value ~= nil then
-            if typeof(value) == "CFrame" then
-                snapshot.properties[prop] = {value:GetComponents()}
-            elseif typeof(value) == "Instance" then
-                snapshot.properties[prop] = getFullPath(value)
-            else
-                snapshot.properties[prop] = value
-            end
-        end
-    end
-    
-    local fileName = string.format("%s/%s_%d_%d.json", ATTACHMENT_FOLDER, victimName:gsub("[^%w]", "_"), index, os.time())
-    writefile(fileName, HttpService:JSONEncode(snapshot))
-    return fileName
-end
-
--- Restore an attachment from its JSON file and delete the file
-local function restoreAttachmentFromFile(filePath)
-    if not isfile(filePath) then return false end
-    local data = HttpService:JSONDecode(readfile(filePath))
-    local target = loadstring("return " .. data.path)()
-    if not target or not target.Parent then
-        delfile(filePath)
-        return false
-    end
-    
-    if target:IsA("Motor6D") or target:IsA("Weld") then
-        if data.properties.Enabled ~= nil then target.Enabled = data.properties.Enabled end
-        if data.properties.C0 and type(data.properties.C0) == "table" then
-            target.C0 = CFrame.new(unpack(data.properties.C0))
-        end
-        if data.properties.C1 and type(data.properties.C1) == "table" then
-            target.C1 = CFrame.new(unpack(data.properties.C1))
-        end
-        if data.properties.Part0 and type(data.properties.Part0) == "string" then
-            local part = loadstring("return " .. data.properties.Part0)()
-            if part then target.Part0 = part end
-        end
-        if data.properties.Part1 and type(data.properties.Part1) == "string" then
-            local part = loadstring("return " .. data.properties.Part1)()
-            if part then target.Part1 = part end
-        end
-    elseif target:IsA("WeldConstraint") then
-        if data.properties.Enabled ~= nil then target.Enabled = data.properties.Enabled end
-        if data.properties.Part1 and type(data.properties.Part1) == "string" then
-            local part = loadstring("return " .. data.properties.Part1)()
-            if part then target.Part1 = part end
-        end
-    elseif target:IsA("Attachment") then
-        if data.properties.Position and type(data.properties.Position) == "table" then
-            target.Position = Vector3.new(unpack(data.properties.Position))
-        end
-        if data.properties.Orientation and type(data.properties.Orientation) == "table" then
-            target.Orientation = Vector3.new(unpack(data.properties.Orientation))
-        end
-        if data.properties.Visible ~= nil then target.Visible = data.properties.Visible end
-    end
-    
-    delfile(filePath)
-    return true
-end
-
--- Update manifest (list of saved files per victim)
-local function updateManifest(victimName, filePath, action)
-    local manifest = {}
-    if isfile(MANIFEST_PATH) then
-        manifest = HttpService:JSONDecode(readfile(MANIFEST_PATH))
-    end
-    if not manifest[victimName] then manifest[victimName] = {} end
-    
-    if action == "add" then
-        table.insert(manifest[victimName], filePath)
-    elseif action == "remove" then
-        for i, p in ipairs(manifest[victimName]) do
-            if p == filePath then table.remove(manifest[victimName], i); break end
-        end
-        if #manifest[victimName] == 0 then manifest[victimName] = nil end
-    end
-    
-    writefile(MANIFEST_PATH, HttpService:JSONEncode(manifest))
-end
-
--- Save and disable all attachments of a victim to files
-local function saveAndDisableVictimAttachments(victim)
-    local char = victim.Character
-    if not char then return {} end
-    local savedFiles = {}
-    local index = 1
-    for _, obj in ipairs(char:GetDescendants()) do
-        if obj:IsA("Motor6D") or obj:IsA("Weld") or obj:IsA("WeldConstraint") or obj:IsA("Attachment") then
-            local filePath = saveAttachmentToFile(obj, victim.Name, index)
-            table.insert(savedFiles, filePath)
-            updateManifest(victim.Name, filePath, "add")
-            -- Disable the attachment
-            if obj:IsA("Motor6D") or obj:IsA("Weld") or obj:IsA("WeldConstraint") then
-                obj.Enabled = false
-            end
-            index = index + 1
-        end
-    end
-    return savedFiles
-end
-
--- Restore all attachments for a victim from their saved files and clean up
-local function restoreVictimFromFiles(victimName)
-    if not isfile(MANIFEST_PATH) then return end
-    local manifest = HttpService:JSONDecode(readfile(MANIFEST_PATH))
-    local files = manifest[victimName]
-    if not files then return end
-    for _, filePath in ipairs(files) do
-        restoreAttachmentFromFile(filePath)
-    end
-    manifest[victimName] = nil
-    writefile(MANIFEST_PATH, HttpService:JSONEncode(manifest))
-end
-
--- Restore all victims from leftover files (on script start)
-local function restoreAllLeftoverAttachments()
-    if not isfile(MANIFEST_PATH) then return end
-    local manifest = HttpService:JSONDecode(readfile(MANIFEST_PATH))
-    for victimName, files in pairs(manifest) do
-        for _, filePath in ipairs(files) do
-            restoreAttachmentFromFile(filePath)
-        end
-    end
-    delfile(MANIFEST_PATH)
-end
-
--- Delete all attachment files and manifest (on disconnect / script end)
-local function cleanupAllAttachmentFiles()
-    if isfolder(ATTACHMENT_FOLDER) then
-        for _, item in ipairs(listfiles(ATTACHMENT_FOLDER)) do
-            delfile(item)
-        end
-        delfolder(ATTACHMENT_FOLDER)
-    end
-end
-
--- ==================== KILLER ATTACHMENT HANDLING (integrated with file persistence) ====================
--- Disable all welds/motor6d for a character and save them to files
-local function disableAndSaveAttachments(char, victimName)
-    if not char then return {} end
-    local disabled = {}
-    for _, obj in ipairs(char:GetDescendants()) do
-        if obj:IsA("Motor6D") or obj:IsA("Weld") or obj:IsA("WeldConstraint") then
-            if obj.Enabled then
-                obj.Enabled = false
-                table.insert(disabled, obj)
-            elseif obj:IsA("WeldConstraint") and obj.Part1 then
-                -- We'll also save this to file
-                local filePath = saveAttachmentToFile(obj, victimName, #disabled+1)
-                updateManifest(victimName, filePath, "add")
-                local part1 = obj.Part1
-                obj.Part1 = nil
-                table.insert(disabled, {obj = obj, part1 = part1})
-            else
-                table.insert(disabled, obj)
-            end
-        end
-    end
-    -- Also save all attachments (they might not be disabled, but we store them for full restore)
-    for _, obj in ipairs(char:GetDescendants()) do
-        if obj:IsA("Attachment") then
-            saveAttachmentToFile(obj, victimName, #disabled+1)
-            updateManifest(victimName, filePath, "add")
-        end
-    end
-    return disabled
-end
-
--- Restore attachments from memory (for active kill mode) - fallback if files fail
-local function restoreAttachmentsFromMemory(disabledList)
-    for _, item in ipairs(disabledList) do
-        if type(item) == "table" and item.obj and item.part1 then
-            item.obj.Part1 = item.part1
-        elseif item:IsA("Motor6D") or item:IsA("Weld") then
-            pcall(function() item.Enabled = true end)
-        elseif item:IsA("WeldConstraint") then
-            pcall(function() item.Enabled = true end)
-        end
-    end
-end
-
--- Store victim's original state, save attachments to files, and disable them
-local function prepareVictim(victim)
-    if not victim or not victim.Character or not victim.Character.Parent then return nil end
-    local char = victim.Character
-    local rootPart = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
-    if not rootPart then return nil end
-    local originalCFrame = rootPart.CFrame
-    local disabledAttachments = disableAndSaveAttachments(char, victim.Name)
-    states.victimData[victim] = {
-        originalCFrame = originalCFrame,
-        attachments = disabledAttachments,
-        character = char,
-        victimName = victim.Name
-    }
-    return states.victimData[victim]
-end
-
--- Restore victim's attachments (from files or memory) and position, then remove from tracking
-local function restoreVictim(victim)
-    local data = states.victimData[victim]
-    if not data then return end
-    
-    -- Restore from files first (most reliable)
-    restoreVictimFromFiles(victim.Name)
-    
-    -- Also restore from memory for any that didn't get file restore
-    if data.attachments then
-        restoreAttachmentsFromMemory(data.attachments)
-    end
-    
-    if data.originalCFrame and data.character and data.character.Parent then
-        local root = data.character:FindFirstChild("HumanoidRootPart") or data.character:FindFirstChild("Torso") or data.character:FindFirstChild("UpperTorso")
-        if root then
-            pcall(function()
-                root.CFrame = data.originalCFrame
-                root.AssemblyLinearVelocity = Vector3.zero
-                root.AssemblyAngularVelocity = Vector3.zero
-            end)
-        end
-    end
-    states.victimData[victim] = nil
-end
-
--- Restore all victims when kill system is disabled
-local function restoreAllVictims()
-    for victim, _ in pairs(states.victimData) do
-        restoreVictim(victim)
-    end
-    states.victimData = {}
-    -- Also cleanup any leftover files just in case
-    if isfile(MANIFEST_PATH) then
-        restoreAllLeftoverAttachments()
-    end
-end
-
--- Update kill system active flag and handle attachment state
-local function updateKillSystemActive()
-    local newActive = states.killActive or states.killEveryone or states.autoGoodKarma or states.autoEvilKarma
-    if newActive == states.killSystemActive then return end
-    states.killSystemActive = newActive
-    if not newActive then
-        restoreAllVictims()
-    end
-end
-
--- ==================== RESTORE LEFTOVER ATTACHMENTS ON SCRIPT START ====================
-restoreAllLeftoverAttachments()
-
--- Also restore when player respawns (in case character was recreated)
-player.CharacterAdded:Connect(function()
-    task.wait(1)
-    restoreAllLeftoverAttachments()
-end)
 
 -- ==================== ROCK DATA ====================
 local rockData = {
@@ -990,7 +1007,6 @@ local function createToggle(parent, text, key, callback)
         local newState = not state
         if callback(newState) == false then newState = false end 
         SetToggle[btn](newState)
-        -- after toggling, update kill system active state
         if key == "kill" or key == "killEveryone" or key == "autoGoodKarma" or key == "autoEvilKarma" then
             updateKillSystemActive()
         end
@@ -1133,8 +1149,28 @@ end
 
 local lockPosBtn, autoRebirthTargetBtn, autoRebirthInfBtn, trackToggle
 
--- ==================== KILL VISIBILITY ====================
-local function updateVisibility(isInvisible) end
+-- ==================== KILL SYSTEM ACTIVE UPDATE ====================
+local function updateKillSystemActive()
+    local newActive = states.killActive or states.killEveryone or states.autoGoodKarma or states.autoEvilKarma
+    
+    if newActive == states.killSystemActive then return end
+    
+    if newActive then
+        -- Kill system turning ON - nothing to restore yet, victims will be saved when killed
+        states.killSystemActive = true
+    else
+        -- Kill system turning OFF - restore all victims from files
+        states.killSystemActive = false
+        if states.victimFileData then
+            for victim, _ in pairs(states.victimFileData) do
+                restoreVictimFromFiles(victim)
+            end
+            states.victimFileData = {}
+        end
+        cleanupAllAttachmentFiles()
+    end
+end
+
 local function checkResetKillAttackTime()
     if not states.killActive and not states.killEveryone and not states.autoGoodKarma and not states.autoEvilKarma then
         local pnc = getPunch()
@@ -2915,7 +2951,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- ==================== MODIFIED KILLER LOOP (WITH FILE-BASED ATTACHMENT HANDLING) ====================
+-- ==================== MODIFIED KILLER LOOP (WITH FILE PERSISTENCE) ====================
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
@@ -2942,9 +2978,9 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                         end
                         
                         if shouldKill and not states.whitelist[p.Name] then 
-                            -- Prepare victim: save attachments to files and disable them, store original position if not already prepared
-                            if not states.victimData[p] then
-                                prepareVictim(p)
+                            -- Save and disable attachments if not already saved for this victim
+                            if not states.victimFileData or not states.victimFileData[p] then
+                                saveAndDisableVictimAttachments(p)
                             end
                             
                             local victimHead = p.Character:FindFirstChild("Head")
@@ -2968,12 +3004,13 @@ end))
 
 -- Clean up victim data when a player leaves
 Players.PlayerRemoving:Connect(function(plr)
-    if states.victimData[plr] then
-        restoreVictim(plr)
+    if states.victimFileData and states.victimFileData[plr] then
+        restoreVictimFromFiles(plr)
     end
-    -- Also clean up any leftover files for that player
-    restoreVictimFromFiles(plr.Name)
 end)
+
+-- ==================== RESTORE LEFTOVER ATTACHMENTS ON SCRIPT START ====================
+restoreAllLeftoverAttachments()
 
 -- ==================== OTHER LOOPS (Unchanged) ====================
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function() 
@@ -3184,8 +3221,7 @@ local function onUnload()
             rock.Anchored = data.Anchored
         end
     end
-    restoreAllVictims()      -- restore all victims (and clean files)
-    cleanupAllAttachmentFiles()  -- final cleanup
+    cleanupAllAttachmentFiles()  -- Clean up all files on script unload
 end
 task.spawn(function()
     while true do
