@@ -21,313 +21,6 @@ local player = Players.LocalPlayer
 
 local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 
--- ==================== FILE & FOLDER UTILITIES ====================
-local ATTACHMENT_FOLDER = "ML_Attachments"
-local MANIFEST_FILE = ATTACHMENT_FOLDER .. "/manifest.json"
-
--- Ensure folder exists
-if not isfolder(ATTACHMENT_FOLDER) then
-    pcall(function() makefolder(ATTACHMENT_FOLDER) end)
-end
-
--- Helper to get full path of an instance (for saving/restoring)
-local function getFullPath(instance)
-    if not instance then return "nil" end
-    local path = {}
-    local current = instance
-    while current ~= game do
-        table.insert(path, 1, current.Name)
-        current = current.Parent
-        if not current then break end
-    end
-    return "game." .. table.concat(path, ".")
-end
-
--- Helper to get instance from path
-local function getInstanceFromPath(pathString)
-    if pathString == "nil" then return nil end
-    local success, result = pcall(function()
-        return loadstring("return " .. pathString)()
-    end)
-    return success and result or nil
-end
-
--- Convert CFrame to table for saving
-local function cframeToTable(cf)
-    if not cf then return nil end
-    local x, y, z, R00, R01, R02, R10, R11, R12, R20, R21, R22 = cf:GetComponents()
-    return {x, y, z, R00, R01, R02, R10, R11, R12, R20, R21, R22}
-end
-
--- Convert table back to CFrame
-local function tableToCframe(t)
-    if not t or #t < 12 then return CFrame.new() end
-    return CFrame.new(
-        t[1], t[2], t[3],
-        t[4], t[5], t[6],
-        t[7], t[8], t[9],
-        t[10], t[11], t[12]
-    )
-end
-
--- ==================== ATTACHMENT PERSISTENCE SYSTEM ====================
--- Save a single attachment to a file
-local function saveAttachmentToFile(attachment, victimName, index)
-    if not attachment then return nil end
-    
-    local snapshot = {
-        path = getFullPath(attachment),
-        className = attachment.ClassName,
-        victim = victimName,
-        timestamp = os.time(),
-        properties = {}
-    }
-    
-    -- Capture properties based on type
-    if attachment:IsA("Motor6D") or attachment:IsA("Weld") then
-        snapshot.properties.Part0 = getFullPath(attachment.Part0)
-        snapshot.properties.Part1 = getFullPath(attachment.Part1)
-        snapshot.properties.C0 = cframeToTable(attachment.C0)
-        snapshot.properties.C1 = cframeToTable(attachment.C1)
-        snapshot.properties.Enabled = attachment.Enabled
-    elseif attachment:IsA("WeldConstraint") then
-        snapshot.properties.Part0 = getFullPath(attachment.Part0)
-        snapshot.properties.Part1 = getFullPath(attachment.Part1)
-        snapshot.properties.Enabled = attachment.Enabled
-    elseif attachment:IsA("Attachment") then
-        snapshot.properties.Position = {attachment.Position.X, attachment.Position.Y, attachment.Position.Z}
-        snapshot.properties.Orientation = {attachment.Orientation.X, attachment.Orientation.Y, attachment.Orientation.Z}
-        snapshot.properties.Visible = attachment.Visible
-        snapshot.properties.WorldPosition = {attachment.WorldPosition.X, attachment.WorldPosition.Y, attachment.WorldPosition.Z}
-    end
-    
-    local fileName = string.format("%s/%s_%d_%d.json", ATTACHMENT_FOLDER, victimName:gsub("[^%w]", "_"), index, os.time())
-    local success, err = pcall(function()
-        writefile(fileName, HttpService:JSONEncode(snapshot))
-    end)
-    
-    if success then
-        return fileName
-    else
-        warn("Failed to save attachment: " .. tostring(err))
-        return nil
-    end
-end
-
--- Restore attachment from file and delete the file
-local function restoreAttachmentFromFile(filePath)
-    if not isfile(filePath) then return false end
-    
-    local success, data = pcall(function()
-        return HttpService:JSONDecode(readfile(filePath))
-    end)
-    
-    if not success or not data then
-        pcall(function() delfile(filePath) end)
-        return false
-    end
-    
-    local target = getInstanceFromPath(data.path)
-    if target and target.Parent then
-        pcall(function()
-            if target:IsA("Motor6D") or target:IsA("Weld") then
-                if data.properties.Part0 then
-                    local part0 = getInstanceFromPath(data.properties.Part0)
-                    if part0 then target.Part0 = part0 end
-                end
-                if data.properties.Part1 then
-                    local part1 = getInstanceFromPath(data.properties.Part1)
-                    if part1 then target.Part1 = part1 end
-                end
-                if data.properties.C0 then target.C0 = tableToCframe(data.properties.C0) end
-                if data.properties.C1 then target.C1 = tableToCframe(data.properties.C1) end
-                target.Enabled = data.properties.Enabled == true
-            elseif target:IsA("WeldConstraint") then
-                if data.properties.Part0 then
-                    local part0 = getInstanceFromPath(data.properties.Part0)
-                    if part0 then target.Part0 = part0 end
-                end
-                if data.properties.Part1 then
-                    local part1 = getInstanceFromPath(data.properties.Part1)
-                    if part1 then target.Part1 = part1 end
-                end
-                target.Enabled = data.properties.Enabled == true
-            elseif target:IsA("Attachment") then
-                if data.properties.Position then
-                    target.Position = Vector3.new(unpack(data.properties.Position))
-                end
-                if data.properties.Orientation then
-                    target.Orientation = Vector3.new(unpack(data.properties.Orientation))
-                end
-                if data.properties.Visible ~= nil then
-                    target.Visible = data.properties.Visible
-                end
-            end
-        end)
-    end
-    
-    -- Delete the file after successful restore attempt
-    pcall(function() delfile(filePath) end)
-    return true
-end
-
--- Save manifest (list of files for each victim)
-local function updateManifest(victimName, filePath, action)
-    if not isfolder(ATTACHMENT_FOLDER) then
-        pcall(function() makefolder(ATTACHMENT_FOLDER) end)
-    end
-    
-    local manifest = {}
-    if isfile(MANIFEST_FILE) then
-        local success, data = pcall(function()
-            return HttpService:JSONDecode(readfile(MANIFEST_FILE))
-        end)
-        if success and type(data) == "table" then
-            manifest = data
-        end
-    end
-    
-    if action == "add" then
-        if not manifest[victimName] then manifest[victimName] = {} end
-        table.insert(manifest[victimName], filePath)
-    elseif action == "remove" and manifest[victimName] then
-        for i, path in ipairs(manifest[victimName]) do
-            if path == filePath then
-                table.remove(manifest[victimName], i)
-                break
-            end
-        end
-        if #manifest[victimName] == 0 then
-            manifest[victimName] = nil
-        end
-    end
-    
-    pcall(function()
-        writefile(MANIFEST_FILE, HttpService:JSONEncode(manifest))
-    end)
-end
-
--- Save all attachments for a victim and disable them
-local function saveAndDisableVictimAttachments(victim)
-    if not victim or not victim.Character then return {} end
-    
-    local char = victim.Character
-    local savedFiles = {}
-    local index = 1
-    
-    -- Save original position
-    local rootPart = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
-    local originalCFrame = rootPart and rootPart.CFrame or nil
-    
-    -- Scan and save all attachments
-    for _, obj in ipairs(char:GetDescendants()) do
-        if obj:IsA("Motor6D") or obj:IsA("Weld") or obj:IsA("WeldConstraint") or obj:IsA("Attachment") then
-            local filePath = saveAttachmentToFile(obj, victim.Name, index)
-            if filePath then
-                table.insert(savedFiles, filePath)
-                updateManifest(victim.Name, filePath, "add")
-                
-                -- Disable the attachment
-                pcall(function()
-                    if obj:IsA("Motor6D") or obj:IsA("Weld") then
-                        obj.Enabled = false
-                    elseif obj:IsA("WeldConstraint") then
-                        obj.Enabled = false
-                    end
-                end)
-                index = index + 1
-            end
-        end
-    end
-    
-    -- Store victim data for tracking
-    states.victimFileData = states.victimFileData or {}
-    states.victimFileData[victim] = {
-        files = savedFiles,
-        originalCFrame = originalCFrame,
-        name = victim.Name
-    }
-    
-    return savedFiles
-end
-
--- Restore all attachments for a victim from saved files
-local function restoreVictimFromFiles(victim)
-    local data = states.victimFileData and states.victimFileData[victim]
-    if not data then return end
-    
-    -- Restore each attachment from its file
-    for _, filePath in ipairs(data.files) do
-        restoreAttachmentFromFile(filePath)
-        updateManifest(data.name, filePath, "remove")
-    end
-    
-    -- Restore original position
-    if data.originalCFrame and victim.Character then
-        local root = victim.Character:FindFirstChild("HumanoidRootPart") or victim.Character:FindFirstChild("Torso") or victim.Character:FindFirstChild("UpperTorso")
-        if root then
-            pcall(function()
-                root.CFrame = data.originalCFrame
-                root.AssemblyLinearVelocity = Vector3.zero
-                root.AssemblyAngularVelocity = Vector3.zero
-            end)
-        end
-    end
-    
-    states.victimFileData[victim] = nil
-end
-
--- Restore all victims from leftover files (on script start)
-local function restoreAllLeftoverAttachments()
-    if not isfile(MANIFEST_FILE) then return end
-    
-    local success, manifest = pcall(function()
-        return HttpService:JSONDecode(readfile(MANIFEST_FILE))
-    end)
-    
-    if not success or type(manifest) ~= "table" then return end
-    
-    print("Found leftover attachment files! Restoring...")
-    
-    for victimName, files in pairs(manifest) do
-        for _, filePath in ipairs(files) do
-            restoreAttachmentFromFile(filePath)
-        end
-    end
-    
-    -- Clean up manifest and folder
-    pcall(function() delfile(MANIFEST_FILE) end)
-    pcall(function()
-        local remaining = listfiles(ATTACHMENT_FOLDER)
-        for _, file in ipairs(remaining) do
-            pcall(function() delfile(file) end)
-        end
-    end)
-end
-
--- Clean up when script ends or disconnect
-local function cleanupAllAttachmentFiles()
-    if states.victimFileData then
-        for victim, data in pairs(states.victimFileData) do
-            for _, filePath in ipairs(data.files) do
-                pcall(function() delfile(filePath) end)
-                if data.name then
-                    updateManifest(data.name, filePath, "remove")
-                end
-            end
-        end
-        states.victimFileData = {}
-    end
-    
-    pcall(function() delfile(MANIFEST_FILE) end)
-    if isfolder(ATTACHMENT_FOLDER) then
-        local files = listfiles(ATTACHMENT_FOLDER)
-        for _, file in ipairs(files) do
-            pcall(function() delfile(file) end)
-        end
-    end
-end
-
 -- ==================== CONFIG ====================
 local Config = { SizeValue = "1", RebirthTarget = "0", WalkSpeed = "16", FlySpeed = "50" }
 
@@ -366,7 +59,6 @@ local states = {
     selectedTool = nil, autoEquip = false, autoClaim = false, autoPunch = false, accelReps = false,
     fastPunch = false, autoSize = false, godMode = false, lockedPos = nil, lastSafePos = nil,
     autoWalkSpeed = false, fly = false, flyBody = nil, autoMuscleKing = false,
-    killTargets = {}, whitelist = {}, whitelistFriends = false, killActive = false, killEveryone = false,
     autoGoodKarma = false, autoEvilKarma = false, statsTarget = nil, trackStats = false,
     viewing = false, withoutFormatNum = false, autoFortuneWheel = false,
     currentPetLabel = nil, currentPetTable = nil, currentAuraLabel = nil, currentAuraTable = nil,
@@ -381,9 +73,19 @@ local states = {
     walkOnWater = true,
     selectedTreadmill = nil, autoTreadmill = false, autoTreadmillThread = nil,
     leaderboardData = {},
-    killSystemActive = false,
-    victimData = {},
-    victimFileData = {} 
+    -- KILLER TAB STATE
+    killEnabled = false,
+    killEveryoneEnabled = false,
+    autoGoodKarmaEnabled = false,
+    autoEvilKarmaEnabled = false,
+    whitelistFriendsEnabled = false,
+    selectedPlayers = {},   -- table of player names (display name)
+    whitelistedPlayers = {}, -- table of player names (display name)
+    gluedHeads = {},        -- map of player -> weld object for head gluing
+    autoKarmaLoop = nil,
+    killHeadLoop = nil,
+    killEveryoneLoop = nil,
+    friendsList = {}        -- cached friends user ids
 }
 
 local rockCache = {}
@@ -934,7 +636,7 @@ else
 end
 
 local frames = {}
-local tabs = {"Auto Farm", "Farm", "Killer", "Stats", "Auto Gym", "Auto Treadmill", "Auto Crystal", "Glitchable Rebirth", "Calculator", "Teleport", "Leaderboard", "Config"}
+local tabs = {"Auto Farm", "Farm", "Stats", "Auto Gym", "Auto Treadmill", "Auto Crystal", "Glitchable Rebirth", "Calculator", "Teleport", "Leaderboard", "Config", "Killer"}
 
 if isMobile then
     SidebarScroll.CanvasSize = UDim2.new(0, #tabs * 75, 0, 0)
@@ -987,34 +689,6 @@ if isMobile then
 end
 
 -- ==================== UI COMPONENTS HELPER ====================
-local function updateKillSystemActive()
-    local newActive = states.killActive or states.killEveryone or states.autoGoodKarma or states.autoEvilKarma
-    
-    if newActive == states.killSystemActive then return end
-    
-    if newActive then
-        -- Kill system turning ON - nothing to restore yet, victims will be saved when killed
-        states.killSystemActive = true
-    else
-        -- Kill system turning OFF - restore all victims from files
-        states.killSystemActive = false
-        if states.victimFileData then
-            for victim, _ in pairs(states.victimFileData) do
-                restoreVictimFromFiles(victim)
-            end
-            states.victimFileData = {}
-        end
-        cleanupAllAttachmentFiles()
-    end
-end
-
-local function checkResetKillAttackTime()
-    if not states.killActive and not states.killEveryone and not states.autoGoodKarma and not states.autoEvilKarma then
-        local pnc = getPunch()
-        if pnc and pnc:FindFirstChild("attackTime") then pnc.attackTime.Value = 0.35 end
-    end
-end
-
 local SetToggle = {}
 local function createToggle(parent, text, key, callback)
     local btn = Instance.new("TextButton", parent)
@@ -1036,9 +710,6 @@ local function createToggle(parent, text, key, callback)
         local newState = not state
         if callback(newState) == false then newState = false end 
         SetToggle[btn](newState)
-        if key == "kill" or key == "killEveryone" or key == "autoGoodKarma" or key == "autoEvilKarma" then
-            updateKillSystemActive()
-        end
     end)
     return btn
 end
@@ -1504,19 +1175,8 @@ openAllChestsBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- ==================== TAB 3: KILLER ====================
-local f3 = frames["Killer"]
-local pKillDD = createDropdown(f3, "Player Dropdown", {}, true, function(label) local realName = nameMap[label] or label; if states.killTargets[realName] then states.killTargets[realName] = nil; return false else states.killTargets[realName] = true; return true end end, function(label) local r = nameMap[label] or label; return states.killTargets[r] end)
-local whiteDD = createDropdown(f3, "Whitelist Dropdown", {}, true, function(label) local realName = nameMap[label] or label; if states.whitelist[realName] then states.whitelist[realName] = nil; return false else states.whitelist[realName] = true; return true end end, function(label) local r = nameMap[label] or label; return states.whitelist[r] end)
-
-createToggle(f3, "Whitelist Friends", nil, function(val) states.whitelistFriends = val; for _, p in ipairs(Players:GetPlayers()) do if p ~= player and player:IsFriendsWith(p.UserId) then if val then states.whitelist[p.Name] = true else states.whitelist[p.Name] = nil end end end end)
-createToggle(f3, "Kill", "kill", function(v) states.killActive = v; if v then updateVisibility(true) else checkResetKillAttackTime() end; updateKillSystemActive() return v end)
-createToggle(f3, "Kill Everyone", "killEveryone", function(v) states.killEveryone = v; if v then updateVisibility(true) else checkResetKillAttackTime() end; updateKillSystemActive() return v end)
-createToggle(f3, "Auto Good Karma", "autoGoodKarma", function(v) states.autoGoodKarma = v; if v then updateVisibility(true) else checkResetKillAttackTime() end; updateKillSystemActive() return v end)
-createToggle(f3, "Auto Evil Karma", "autoEvilKarma", function(v) states.autoEvilKarma = v; if v then updateVisibility(true) else checkResetKillAttackTime() end; updateKillSystemActive() return v end)
-
--- ==================== TAB 4: STATS & INVENTORY (LIVE UPDATE) ====================
-local f4 = frames["Stats"]
+-- ==================== TAB 3: STATS & INVENTORY (LIVE UPDATE) ====================
+local f3 = frames["Stats"]
 local statsPlayerDD
 local basicDD, advDD, rareDD, epicDD, uniqueDD
 local auraBasicDD, auraAdvDD, auraRareDD, auraEpicDD, auraUniqueDD
@@ -1613,7 +1273,7 @@ local function resetStatsUI()
     clearPetAuraUI()
 end
 
-statsPlayerDD = createDropdown(f4, "Player Dropdown", {}, false, function(label)
+statsPlayerDD = createDropdown(f3, "Player Dropdown", {}, false, function(label)
     local newTarget = nameMap[label] or label
     if states.statsTarget ~= newTarget then
         states.statsTarget = newTarget
@@ -1646,66 +1306,66 @@ end)
 
 Players.PlayerRemoving:Connect(function(plr) if states.statsTarget == plr.Name then resetStatsUI() end end)
 
-trackToggle = createToggle(f4, "Track Stats", "trackStats", function(v)
+trackToggle = createToggle(f3, "Track Stats", "trackStats", function(v)
     states.trackStats = v
     if v and not states.statsTarget then return false end
     return v
 end)
 
-createToggle(f4, "Without Format Number", "withoutFormatNum", function(v) states.withoutFormatNum = v end)
+createToggle(f3, "Without Format Number", "withoutFormatNum", function(v) states.withoutFormatNum = v end)
 
-local tpToPlayerBtn = Instance.new("TextButton", f4)
+local tpToPlayerBtn = Instance.new("TextButton", f3)
 tpToPlayerBtn.Size = UDim2.new(1, -10, 0, 30); tpToPlayerBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 60); tpToPlayerBtn.Text = "Teleport Player"; tpToPlayerBtn.TextColor3 = Color3.new(1, 1, 1)
 tpToPlayerBtn.MouseButton1Click:Connect(function() if states.statsTarget then local tp = Players:FindFirstChild(states.statsTarget); if tp and tp.Character and tp.Character:FindFirstChild("HumanoidRootPart") and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then player.Character.HumanoidRootPart.CFrame = tp.Character.HumanoidRootPart.CFrame end end end)
 
 local statNamesList = {"Strength", "Durability", "Agility", "Rebirth", "Rebirth Multiplier", "Brawl", "Kill", "Gems", "Brawl Kill", "Size", "Speed", "Good Karma", "Evil Karma", "Auto Lift", "Muscle King Time", "Save Size", "Save Speed", "Current Map"}
 local statsDisp = {}
-for _, s in ipairs(statNamesList) do local l = Instance.new("TextLabel", f4)
+for _, s in ipairs(statNamesList) do local l = Instance.new("TextLabel", f3)
     l.Size = UDim2.new(1, -10, 0, 20); l.Text = s .. ": None"; l.BackgroundTransparency = 1; l.TextColor3 = Color3.new(1, 1, 1)
     l.TextXAlignment = Enum.TextXAlignment.Left; statsDisp[s] = l end
 
-createToggle(f4, "View Player", "viewing", function(val) states.viewing = val; if not val and player.Character and player.Character:FindFirstChild("Humanoid") then workspace.CurrentCamera.CameraSubject = player.Character.Humanoid end end)
+createToggle(f3, "View Player", "viewing", function(val) states.viewing = val; if not val and player.Character and player.Character:FindFirstChild("Humanoid") then workspace.CurrentCamera.CameraSubject = player.Character.Humanoid end end)
 
-local invHeader = Instance.new("TextLabel", f4)
+local invHeader = Instance.new("TextLabel", f3)
 invHeader.Size = UDim2.new(1, -10, 0, 25); invHeader.Text = "--- PETS ---"; invHeader.BackgroundTransparency = 1; invHeader.TextColor3 = Color3.fromRGB(200, 200, 0)
 invHeader.Font = Enum.Font.SourceSansBold; invHeader.TextSize = 18
 
-petDetails = Instance.new("TextLabel", f4); petDetails.Size = UDim2.new(1, -10, 0, 140); petDetails.BackgroundTransparency = 1
+petDetails = Instance.new("TextLabel", f3); petDetails.Size = UDim2.new(1, -10, 0, 140); petDetails.BackgroundTransparency = 1
 petDetails.TextColor3 = Color3.new(1, 1, 1); petDetails.TextXAlignment = Enum.TextXAlignment.Left; petDetails.TextYAlignment = Enum.TextYAlignment.Top
 petDetails.Text = "Select a Pet to view stats"
 
-basicDD = createDropdown(f4, "Basic Pets", {"Nothing Here"}, false, function(l) states.currentPetLabel = l; handleItemSelection(l, petRefsBasic, petDetails) end)
-advDD = createDropdown(f4, "Advance Pets", {"Nothing Here"}, false, function(l) states.currentPetLabel = l; handleItemSelection(l, petRefsAdv, petDetails) end)
-rareDD = createDropdown(f4, "Rare Pets", {"Nothing Here"}, false, function(l) states.currentPetLabel = l; handleItemSelection(l, petRefsRare, petDetails) end)
-epicDD = createDropdown(f4, "Epic Pets", {"Nothing Here"}, false, function(l) states.currentPetLabel = l; handleItemSelection(l, petRefsEpic, petDetails) end)
-uniqueDD = createDropdown(f4, "Unique Pets", {"Nothing Here"}, false, function(l) states.currentPetLabel = l; handleItemSelection(l, petRefsUnique, petDetails) end)
+basicDD = createDropdown(f3, "Basic Pets", {"Nothing Here"}, false, function(l) states.currentPetLabel = l; handleItemSelection(l, petRefsBasic, petDetails) end)
+advDD = createDropdown(f3, "Advance Pets", {"Nothing Here"}, false, function(l) states.currentPetLabel = l; handleItemSelection(l, petRefsAdv, petDetails) end)
+rareDD = createDropdown(f3, "Rare Pets", {"Nothing Here"}, false, function(l) states.currentPetLabel = l; handleItemSelection(l, petRefsRare, petDetails) end)
+epicDD = createDropdown(f3, "Epic Pets", {"Nothing Here"}, false, function(l) states.currentPetLabel = l; handleItemSelection(l, petRefsEpic, petDetails) end)
+uniqueDD = createDropdown(f3, "Unique Pets", {"Nothing Here"}, false, function(l) states.currentPetLabel = l; handleItemSelection(l, petRefsUnique, petDetails) end)
 
-local auraHeader = Instance.new("TextLabel", f4); auraHeader.Size = UDim2.new(1, -10, 0, 25); auraHeader.Text = "--- AURAS ---"; auraHeader.BackgroundTransparency = 1
+local auraHeader = Instance.new("TextLabel", f3); auraHeader.Size = UDim2.new(1, -10, 0, 25); auraHeader.Text = "--- AURAS ---"; auraHeader.BackgroundTransparency = 1
 auraHeader.TextColor3 = Color3.fromRGB(200, 0, 200); auraHeader.Font = Enum.Font.SourceSansBold; auraHeader.TextSize = 18
 
-auraDetails = Instance.new("TextLabel", f4); auraDetails.Size = UDim2.new(1, -10, 0, 140)
+auraDetails = Instance.new("TextLabel", f3); auraDetails.Size = UDim2.new(1, -10, 0, 140)
 auraDetails.BackgroundTransparency = 1; auraDetails.TextColor3 = Color3.new(1, 1, 1); auraDetails.TextXAlignment = Enum.TextXAlignment.Left; auraDetails.TextYAlignment = Enum.TextYAlignment.Top
 auraDetails.Text = "Select an Aura to view stats"
 
-auraBasicDD = createDropdown(f4, "Basic Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; handleItemSelection(l, auraRefsBasic, auraDetails) end)
-auraAdvDD = createDropdown(f4, "Advance Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; handleItemSelection(l, auraRefsAdv, auraDetails) end)
-auraRareDD = createDropdown(f4, "Rare Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; handleItemSelection(l, auraRefsRare, auraDetails) end)
-auraEpicDD = createDropdown(f4, "Epic Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; handleItemSelection(l, auraRefsEpic, auraDetails) end)
-auraUniqueDD = createDropdown(f4, "Unique Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; handleItemSelection(l, auraRefsUnique, auraDetails) end)
+auraBasicDD = createDropdown(f3, "Basic Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; handleItemSelection(l, auraRefsBasic, auraDetails) end)
+auraAdvDD = createDropdown(f3, "Advance Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; handleItemSelection(l, auraRefsAdv, auraDetails) end)
+auraRareDD = createDropdown(f3, "Rare Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; handleItemSelection(l, auraRefsRare, auraDetails) end)
+auraEpicDD = createDropdown(f3, "Epic Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; handleItemSelection(l, auraRefsEpic, auraDetails) end)
+auraUniqueDD = createDropdown(f3, "Unique Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; handleItemSelection(l, auraRefsUnique, auraDetails) end)
 
-local ultHeader = Instance.new("TextLabel", f4); ultHeader.Size = UDim2.new(1, -10, 0, 20); ultHeader.Text = "--- ULTIMATES ---"; ultHeader.BackgroundTransparency = 1; ultHeader.TextColor3 = Color3.fromRGB(0, 200, 200); ultHeader.Font = Enum.Font.SourceSansBold; ultHeader.TextXAlignment = Enum.TextXAlignment.Left
-local ultList = Instance.new("TextLabel", f4); ultList.Size = UDim2.new(1, -10, 0, 250); ultList.BackgroundTransparency = 1; ultList.TextColor3 = Color3.new(1, 1, 1); ultList.TextXAlignment = Enum.TextXAlignment.Left; ultList.TextYAlignment = Enum.TextYAlignment.Top; ultList.Text = "None"; ultList.TextWrapped = true; ultList.AutomaticSize = Enum.AutomaticSize.Y
+local ultHeader = Instance.new("TextLabel", f3); ultHeader.Size = UDim2.new(1, -10, 0, 20); ultHeader.Text = "--- ULTIMATES ---"; ultHeader.BackgroundTransparency = 1; ultHeader.TextColor3 = Color3.fromRGB(0, 200, 200); ultHeader.Font = Enum.Font.SourceSansBold; ultHeader.TextXAlignment = Enum.TextXAlignment.Left
+local ultList = Instance.new("TextLabel", f3); ultList.Size = UDim2.new(1, -10, 0, 250); ultList.BackgroundTransparency = 1; ultList.TextColor3 = Color3.new(1, 1, 1); ultList.TextXAlignment = Enum.TextXAlignment.Left; ultList.TextYAlignment = Enum.TextYAlignment.Top; ultList.Text = "None"; ultList.TextWrapped = true; ultList.AutomaticSize = Enum.AutomaticSize.Y
 
-local gpHeader = Instance.new("TextLabel", f4); gpHeader.Size = UDim2.new(1, -10, 0, 20); gpHeader.Text = "--- GAMEPASSES ---"; gpHeader.BackgroundTransparency = 1; gpHeader.TextColor3 = Color3.fromRGB(0, 200, 100); gpHeader.Font = Enum.Font.SourceSansBold; gpHeader.TextXAlignment = Enum.TextXAlignment.Left
-local gpList = Instance.new("TextLabel", f4); gpList.Size = UDim2.new(1, -10, 0, 200); gpList.BackgroundTransparency = 1; gpList.TextColor3 = Color3.new(1, 1, 1); gpList.TextXAlignment = Enum.TextXAlignment.Left; gpList.TextYAlignment = Enum.TextYAlignment.Top; gpList.Text = "None"; gpList.TextWrapped = true; gpList.AutomaticSize = Enum.AutomaticSize.Y
+local gpHeader = Instance.new("TextLabel", f3); gpHeader.Size = UDim2.new(1, -10, 0, 20); gpHeader.Text = "--- GAMEPASSES ---"; gpHeader.BackgroundTransparency = 1; gpHeader.TextColor3 = Color3.fromRGB(0, 200, 100); gpHeader.Font = Enum.Font.SourceSansBold; gpHeader.TextXAlignment = Enum.TextXAlignment.Left
+local gpList = Instance.new("TextLabel", f3); gpList.Size = UDim2.new(1, -10, 0, 200); gpList.BackgroundTransparency = 1; gpList.TextColor3 = Color3.new(1, 1, 1); gpList.TextXAlignment = Enum.TextXAlignment.Left; gpList.TextYAlignment = Enum.TextYAlignment.Top; gpList.Text = "None"; gpList.TextWrapped = true; gpList.AutomaticSize = Enum.AutomaticSize.Y
 
--- ==================== TAB 5: AUTO GYM ====================
-local f5 = frames["Auto Gym"]
+-- ==================== TAB 4: AUTO GYM ====================
+local f4 = frames["Auto Gym"]
 
 local mapDD
 local gymDD
 
-mapDD = createDropdown(f5, "Select Map", {"Tiny Island", "Beach", "Legend Beach", "Frozen Island", "Mystic Island", "Inferno Island", "Legend Island", "Muscle King Island", "Jungle Island"}, false, function(map)
+mapDD = createDropdown(f4, "Select Map", {"Tiny Island", "Beach", "Legend Beach", "Frozen Island", "Mystic Island", "Inferno Island", "Legend Island", "Muscle King Island", "Jungle Island"}, false, function(map)
     states.selectedMap = map
     states.selectedGym = nil
     local gymOptions = {}
@@ -1727,7 +1387,7 @@ end)
 dropdownSetters["selectMap"] = mapDD
 dropdownHeaderSetters["selectMap"] = mapDD
 
-gymDD = createDropdown(f5, "Select Gym", {"Select map first"}, false, function(gymName)
+gymDD = createDropdown(f4, "Select Gym", {"Select map first"}, false, function(gymName)
     if not states.selectedMap or gymName == "Select map first" or gymName == "No gyms available" then return end
     local realName = gymName:gsub(" %(.*%)", "")
     states.selectedGym = realName
@@ -1735,7 +1395,7 @@ end)
 dropdownSetters["selectGym"] = gymDD
 dropdownHeaderSetters["selectGym"] = gymDD
 
-local gymBtn = Instance.new("TextButton", f5)
+local gymBtn = Instance.new("TextButton", f4)
 gymBtn.Size = UDim2.new(1, -10, 0, 35)
 gymBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
 gymBtn.Text = "Gym"
@@ -1769,7 +1429,7 @@ gymBtn.MouseButton1Click:Connect(function()
     end)
 end)
 
-local autoGymBtn = createToggle(f5, "Auto Gym", "autoGym", function(val)
+local autoGymBtn = createToggle(f4, "Auto Gym", "autoGym", function(val)
     if val then
         if not states.selectedMap or not states.selectedGym then return false end
         startAutoGym()
@@ -1779,8 +1439,8 @@ local autoGymBtn = createToggle(f5, "Auto Gym", "autoGym", function(val)
     return val
 end)
 
--- ==================== TAB 6: AUTO TREADMILL ====================
-local f6 = frames["Auto Treadmill"]
+-- ==================== TAB 5: AUTO TREADMILL ====================
+local f5 = frames["Auto Treadmill"]
 
 -- Ordered list to guarantee clean display order (EXP 1 → 8)
 local treadmillOrder = {
@@ -1802,7 +1462,7 @@ for _, name in ipairs(treadmillOrder) do
     end
 end
 
-local treadmillDD = createDropdown(f6, "Select Treadmill", treadmillOptions, false, function(display)
+local treadmillDD = createDropdown(f5, "Select Treadmill", treadmillOptions, false, function(display)
     local realName = display:match("^(.-) %(")
     if realName and treadmillData[realName] then
         states.selectedTreadmill = realName
@@ -1811,7 +1471,7 @@ local treadmillDD = createDropdown(f6, "Select Treadmill", treadmillOptions, fal
     end
 end)
 
-local autoTreadmillBtn = createToggle(f6, "Auto Treadmill", "autoTreadmill", function(val)
+local autoTreadmillBtn = createToggle(f5, "Auto Treadmill", "autoTreadmill", function(val)
     if val then
         if not states.selectedTreadmill then return false end
         startAutoTreadmill()
@@ -1821,8 +1481,8 @@ local autoTreadmillBtn = createToggle(f6, "Auto Treadmill", "autoTreadmill", fun
     return val
 end)
 
--- ==================== TAB 7: AUTO CRYSTAL ====================
-local f7 = frames["Auto Crystal"]
+-- ==================== TAB 6: AUTO CRYSTAL ====================
+local f6 = frames["Auto Crystal"]
 
 local petList = {}
 local auraList = {}
@@ -2027,11 +1687,11 @@ local function createCrystalSection(parent, title, list, stateKeyData, stateKeyN
     return dropdown
 end
 
-createCrystalSection(f7, "--- PETS ---", petList, "selectedPetCrystalData", "selectedPetCrystal", startAutoPetBuy, stopAutoPetBuy)
-createCrystalSection(f7, "--- AURAS ---", auraList, "selectedAuraCrystalData", "selectedAuraCrystal", startAutoAuraBuy, stopAutoAuraBuy)
+createCrystalSection(f6, "--- PETS ---", petList, "selectedPetCrystalData", "selectedPetCrystal", startAutoPetBuy, stopAutoPetBuy)
+createCrystalSection(f6, "--- AURAS ---", auraList, "selectedAuraCrystalData", "selectedAuraCrystal", startAutoAuraBuy, stopAutoAuraBuy)
 
--- ==================== TAB 8: GLITCHABLE REBIRTH ====================
-local f8 = frames["Glitchable Rebirth"]
+-- ==================== TAB 7: GLITCHABLE REBIRTH ====================
+local f7 = frames["Glitchable Rebirth"]
 
 local glitchRockOptions = {}
 local rockOrder = {"Tiny Rock", "Punching Rock", "Large Rock", "Golden Rock", "Frozen Rock", "Mystic Rock", "Inferno Rock", "Legend Rock", "Muscle King Rock", "Jungle Rock"}
@@ -2045,7 +1705,7 @@ end
 local selectedGlitchRock = nil
 local expGivesResult = nil
 
-local glitchRockDD = createDropdown(f8, "Rock Dropdown", glitchRockOptions, false, function(v)
+local glitchRockDD = createDropdown(f7, "Rock Dropdown", glitchRockOptions, false, function(v)
     local rockName = v:match("^(.-) %(")
     if rockName and rockData[rockName] then
         selectedGlitchRock = rockName
@@ -2057,7 +1717,7 @@ local glitchRockDD = createDropdown(f8, "Rock Dropdown", glitchRockOptions, fals
     _G.GlitchPetExpCalcLabel.Text = "Result: N/A"
 end)
 
-local expGivesLabel = Instance.new("TextLabel", f8)
+local expGivesLabel = Instance.new("TextLabel", f7)
 expGivesLabel.Size = UDim2.new(1, -10, 0, 25)
 expGivesLabel.BackgroundTransparency = 1
 expGivesLabel.Text = "EXP GIVES: N/A"
@@ -2066,7 +1726,7 @@ expGivesLabel.Font = Enum.Font.Gotham
 expGivesLabel.TextSize = 12
 _G.GlitchExpGivesLabel = expGivesLabel
 
-local glitchableLabel = Instance.new("TextLabel", f8)
+local glitchableLabel = Instance.new("TextLabel", f7)
 glitchableLabel.Size = UDim2.new(1, -10, 0, 25)
 glitchableLabel.BackgroundTransparency = 1
 glitchableLabel.Text = "GLITCHABLE?: N/A"
@@ -2075,7 +1735,7 @@ glitchableLabel.Font = Enum.Font.Gotham
 glitchableLabel.TextSize = 12
 _G.GlitchGlitchableLabel = glitchableLabel
 
-local calcExpGivesBtn = Instance.new("TextButton", f8)
+local calcExpGivesBtn = Instance.new("TextButton", f7)
 calcExpGivesBtn.Size = UDim2.new(1, -10, 0, 35)
 calcExpGivesBtn.BackgroundColor3 = Color3.fromRGB(40, 80, 140)
 calcExpGivesBtn.Text = "Calculate My Rebirth Exp Gives"
@@ -2091,7 +1751,7 @@ calcExpGivesBtn.MouseButton1Click:Connect(function()
     glitchableLabel.Text = "GLITCHABLE?: " .. (result % 1 == 0 and "YES" or "NO")
 end)
 
-local expTextBox = Instance.new("TextBox", f8)
+local expTextBox = Instance.new("TextBox", f7)
 expTextBox.Size = UDim2.new(1, -10, 0, 30)
 expTextBox.PlaceholderText = "EXP (whole numbers only)"
 expTextBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
@@ -2102,7 +1762,7 @@ expTextBox:GetPropertyChangedSignal("Text"):Connect(function()
     if filtered ~= expTextBox.Text then expTextBox.Text = filtered end
 end)
 
-local calcRebirthRequiredBtn = Instance.new("TextButton", f8)
+local calcRebirthRequiredBtn = Instance.new("TextButton", f7)
 calcRebirthRequiredBtn.Size = UDim2.new(1, -10, 0, 35)
 calcRebirthRequiredBtn.BackgroundColor3 = Color3.fromRGB(40, 80, 140)
 calcRebirthRequiredBtn.Text = "Check Rebirth Required"
@@ -2121,7 +1781,7 @@ calcRebirthRequiredBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-local rebirthRequiredLabel = Instance.new("TextLabel", f8)
+local rebirthRequiredLabel = Instance.new("TextLabel", f7)
 rebirthRequiredLabel.Size = UDim2.new(1, -10, 0, 25)
 rebirthRequiredLabel.BackgroundTransparency = 1
 rebirthRequiredLabel.Text = "Rebirth Required: N/A"
@@ -2130,7 +1790,7 @@ rebirthRequiredLabel.Font = Enum.Font.Gotham
 rebirthRequiredLabel.TextSize = 12
 _G.GlitchRebirthRequiredLabel = rebirthRequiredLabel
 
-local petExpTextBox = Instance.new("TextBox", f8)
+local petExpTextBox = Instance.new("TextBox", f7)
 petExpTextBox.Size = UDim2.new(1, -10, 0, 30)
 petExpTextBox.PlaceholderText = "PET EXP (whole numbers only)"
 petExpTextBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
@@ -2141,7 +1801,7 @@ petExpTextBox:GetPropertyChangedSignal("Text"):Connect(function()
     if filtered ~= petExpTextBox.Text then petExpTextBox.Text = filtered end
 end)
 
-local calcPetExpBtn = Instance.new("TextButton", f8)
+local calcPetExpBtn = Instance.new("TextButton", f7)
 calcPetExpBtn.Size = UDim2.new(1, -10, 0, 35)
 calcPetExpBtn.BackgroundColor3 = Color3.fromRGB(40, 80, 140)
 calcPetExpBtn.Text = "Calculate PET EXP - EXP GIVES"
@@ -2155,7 +1815,7 @@ calcPetExpBtn.MouseButton1Click:Connect(function()
     _G.GlitchPetExpCalcLabel.Text = "Result: " .. result
 end)
 
-local petExpCalcLabel = Instance.new("TextLabel", f8)
+local petExpCalcLabel = Instance.new("TextLabel", f7)
 petExpCalcLabel.Size = UDim2.new(1, -10, 0, 25)
 petExpCalcLabel.BackgroundTransparency = 1
 petExpCalcLabel.Text = "Result: N/A"
@@ -2164,10 +1824,10 @@ petExpCalcLabel.Font = Enum.Font.Gotham
 petExpCalcLabel.TextSize = 12
 _G.GlitchPetExpCalcLabel = petExpCalcLabel
 
--- ==================== TAB 9: CALCULATOR ====================
-local f9 = frames["Calculator"]
+-- ==================== TAB 8: CALCULATOR ====================
+local f8 = frames["Calculator"]
 
-local calcInput = Instance.new("TextBox", f9)
+local calcInput = Instance.new("TextBox", f8)
 calcInput.Size = UDim2.new(1, -10, 0, 35)
 calcInput.PlaceholderText = "Expression (e.g. 2x2 or (20+20)*12.5)"
 calcInput.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
@@ -2176,7 +1836,7 @@ calcInput.Font = Enum.Font.Gotham
 calcInput.TextSize = 14
 calcInput.ClearTextOnFocus = false
 
-local calcResultLabel = Instance.new("TextLabel", f9)
+local calcResultLabel = Instance.new("TextLabel", f8)
 calcResultLabel.Size = UDim2.new(1, -10, 0, 30)
 calcResultLabel.BackgroundTransparency = 1
 calcResultLabel.Text = "Result: "
@@ -2184,7 +1844,7 @@ calcResultLabel.TextColor3 = Color3.new(1, 1, 1)
 calcResultLabel.Font = Enum.Font.GothamBold
 calcResultLabel.TextSize = 16
 
-local calcBtn = Instance.new("TextButton", f9)
+local calcBtn = Instance.new("TextButton", f8)
 calcBtn.Size = UDim2.new(1, -10, 0, 40)
 calcBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
 calcBtn.Text = "Calculate"
@@ -2207,7 +1867,7 @@ calcBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-local clearCalcBtn = Instance.new("TextButton", f9)
+local clearCalcBtn = Instance.new("TextButton", f8)
 clearCalcBtn.Size = UDim2.new(1, -10, 0, 35)
 clearCalcBtn.BackgroundColor3 = Color3.fromRGB(90, 40, 40)
 clearCalcBtn.Text = "Clear Text"
@@ -2217,8 +1877,8 @@ clearCalcBtn.MouseButton1Click:Connect(function()
     calcResultLabel.Text = "Result: "
 end)
 
--- ==================== TAB 10: TELEPORT ====================
-local f10 = frames["Teleport"]
+-- ==================== TAB 9: TELEPORT ====================
+local f9 = frames["Teleport"]
 
 local teleportList = {
     {name = "Safe Spot", pos = Vector3.new(218.565002, 41.153748, -8129.369629)},
@@ -2233,7 +1893,7 @@ local teleportList = {
 }
 
 for _, tpData in ipairs(teleportList) do
-    local btn = Instance.new("TextButton", f10)
+    local btn = Instance.new("TextButton", f9)
     btn.Size = UDim2.new(1, -10, 0, 35)
     btn.Text = tpData.name
     btn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
@@ -2246,7 +1906,7 @@ for _, tpData in ipairs(teleportList) do
     end)
 end
 
--- ==================== TAB 11: LEADERBOARD ====================
+-- ==================== TAB 10: LEADERBOARD ====================
 local f_leaderboard = frames["Leaderboard"]
 
 local leaderboardTitle = Instance.new("TextLabel", f_leaderboard)
@@ -2367,8 +2027,8 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- ==================== TAB 12: CONFIG ====================
-local f11 = frames["Config"]
+-- ==================== TAB 11: CONFIG ====================
+local f10 = frames["Config"]
 
 local configFilePath = "ML_Expert_Configs.json"
 local savedConfigs = {}
@@ -2388,13 +2048,13 @@ for name, _ in pairs(savedConfigs) do
 end
 if #configNames == 0 then table.insert(configNames, "No saved configs") end
 
-local configDropdown = createDropdown(f11, "Saved Config", configNames, false, function(name)
+local configDropdown = createDropdown(f10, "Saved Config", configNames, false, function(name)
     if name ~= "No saved configs" then
         selectedConfigName = name
     end
 end)
 
-local nameTextBox = Instance.new("TextBox", f11)
+local nameTextBox = Instance.new("TextBox", f10)
 nameTextBox.Size = UDim2.new(1, -10, 0, 30)
 nameTextBox.PlaceholderText = "Config Name"
 nameTextBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
@@ -2413,7 +2073,7 @@ local function stopAllAutomations()
     stopAutoAuraBuy()
 end
 
-local saveBtn = Instance.new("TextButton", f11)
+local saveBtn = Instance.new("TextButton", f10)
 saveBtn.Size = UDim2.new(1, -10, 0, 35)
 saveBtn.Text = "Save Config"
 saveBtn.BackgroundColor3 = Color3.fromRGB(40, 120, 40)
@@ -2476,12 +2136,12 @@ saveBtn.MouseButton1Click:Connect(function()
     configDropdown.setHeaderText("Saved Config v")
 end)
 
-createToggle(f11, "Stop Everything", "stopEverything", function(val)
+createToggle(f10, "Stop Everything", "stopEverything", function(val)
     states.stopEverything = val
     return val
 end)
 
-local loadBtn = Instance.new("TextButton", f11)
+local loadBtn = Instance.new("TextButton", f10)
 loadBtn.Size = UDim2.new(1, -10, 0, 35)
 loadBtn.Text = "Load Config"
 loadBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 120)
@@ -2601,7 +2261,7 @@ loadBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-local removeConfigBtn = Instance.new("TextButton", f11)
+local removeConfigBtn = Instance.new("TextButton", f10)
 removeConfigBtn.Size = UDim2.new(1, -10, 0, 35)
 removeConfigBtn.Text = "Remove Config"
 removeConfigBtn.BackgroundColor3 = Color3.fromRGB(120, 40, 40)
@@ -2623,6 +2283,322 @@ removeConfigBtn.MouseButton1Click:Connect(function()
         end
     end)
 end)
+
+-- ==================== TAB 12: KILLER ====================
+local f_killer = frames["Killer"]
+
+-- Helper: get display name for a player object
+local function getPlayerDisplayName(plr)
+    return plr.DisplayName .. " (@" .. plr.Name .. ")"
+end
+
+-- Helper: get player object from display name string
+local function getPlayerFromDisplay(display)
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if getPlayerDisplayName(plr) == display then
+            return plr
+        end
+    end
+    return nil
+end
+
+-- Helper: kill a player (fire muscleEvent to kill)
+local function killPlayer(targetPlayer)
+    if not targetPlayer or targetPlayer == player then return end
+    pcall(function()
+        -- Use the same method as auto glitch: muscleEvent:FireServer("punch", "rightHand")
+        -- But to kill we may need to ensure we are close and have punch tool equipped
+        local char = player.Character
+        if not char then return end
+        local punch = getPunch()
+        if punch and punch.Parent ~= char then
+            punch.Parent = char
+        end
+        -- Teleport to target
+        if targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            local targetRoot = targetPlayer.Character.HumanoidRootPart
+            if char:FindFirstChild("HumanoidRootPart") then
+                char.HumanoidRootPart.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 3)
+            end
+        end
+        task.wait(0.1)
+        player.muscleEvent:FireServer("punch", "rightHand")
+    end)
+end
+
+-- Function to update player dropdown options
+local function updatePlayerDropdownOptions()
+    local options = {}
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= player then
+            table.insert(options, getPlayerDisplayName(plr))
+        end
+    end
+    if #options == 0 then
+        table.insert(options, "No other players")
+    end
+    playerDropdown.refresh(options)
+    whitelistDropdown.refresh(options)
+end
+
+-- Function to handle multi-select for player dropdown
+local function togglePlayerSelection(displayName)
+    if displayName == "No other players" then return false end
+    if states.selectedPlayers[displayName] then
+        states.selectedPlayers[displayName] = nil
+    else
+        states.selectedPlayers[displayName] = true
+    end
+    return states.selectedPlayers[displayName] or false
+end
+
+-- Function to handle multi-select for whitelist dropdown
+local function toggleWhitelistSelection(displayName)
+    if displayName == "No other players" then return false end
+    if states.whitelistedPlayers[displayName] then
+        states.whitelistedPlayers[displayName] = nil
+    else
+        states.whitelistedPlayers[displayName] = true
+    end
+    -- If friends toggle is on, also update friends list automatically? We'll handle separately.
+    return states.whitelistedPlayers[displayName] or false
+end
+
+-- Function to get friends list (uses Roblox API, may fail, but we try)
+local function fetchFriendsList()
+    local success, result = pcall(function()
+        local url = "https://friends.roblox.com/v1/users/" .. player.UserId .. "/friends"
+        local data = game:HttpGet(url)
+        return HttpService:JSONDecode(data)
+    end)
+    if success and result and result.data then
+        local friendIds = {}
+        for _, friend in ipairs(result.data) do
+            friendIds[friend.id] = true
+        end
+        return friendIds
+    end
+    return {}
+end
+
+-- Function to update whitelist with friends
+local function updateWhitelistWithFriends()
+    if not states.whitelistFriendsEnabled then return end
+    local friendIds = fetchFriendsList()
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if friendIds[plr.UserId] then
+            local display = getPlayerDisplayName(plr)
+            states.whitelistedPlayers[display] = true
+        end
+    end
+    whitelistDropdown.refresh(whitelistDropdown.optionsList)
+end
+
+-- Handle new player join for friends whitelist
+Players.PlayerAdded:Connect(function(newPlayer)
+    updatePlayerDropdownOptions()
+    if states.whitelistFriendsEnabled then
+        local friendIds = fetchFriendsList()
+        if friendIds[newPlayer.UserId] then
+            local display = getPlayerDisplayName(newPlayer)
+            states.whitelistedPlayers[display] = true
+            whitelistDropdown.refresh(whitelistDropdown.optionsList)
+        end
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(leavingPlayer)
+    updatePlayerDropdownOptions()
+    local display = getPlayerDisplayName(leavingPlayer)
+    states.selectedPlayers[display] = nil
+    states.whitelistedPlayers[display] = nil
+    -- Also remove any glued head for that player
+    if states.gluedHeads[display] then
+        local weld = states.gluedHeads[display]
+        if weld and weld.Parent then weld:Destroy() end
+        states.gluedHeads[display] = nil
+    end
+end)
+
+-- Create UI elements for Killer tab
+local playerDropdown = createDropdown(f_killer, "Select Players", {"No other players"}, true, function(display)
+    return togglePlayerSelection(display)
+end)
+
+local whitelistDropdown = createDropdown(f_killer, "Whitelist Players", {"No other players"}, true, function(display)
+    return toggleWhitelistSelection(display)
+end)
+
+local whitelistFriendsToggle = createToggle(f_killer, "Whitelist Friends", "whitelistFriends", function(val)
+    states.whitelistFriendsEnabled = val
+    if val then
+        updateWhitelistWithFriends()
+    end
+    return val
+end)
+
+local killToggle = createToggle(f_killer, "Kill", "killToggle", function(val)
+    states.killEnabled = val
+    if val then
+        -- Ensure we have at least one selected player
+        local hasSelected = false
+        for _ in pairs(states.selectedPlayers) do hasSelected = true; break end
+        if not hasSelected then
+            return false
+        end
+        -- Start head gluing loop for selected players
+        if states.killHeadLoop then task.cancel(states.killHeadLoop) end
+        states.killHeadLoop = task.spawn(function()
+            while states.killEnabled do
+                if states.stopEverything then break end
+                -- For each selected player, glue their head to our right hand
+                for display, _ in pairs(states.selectedPlayers) do
+                    local target = getPlayerFromDisplay(display)
+                    if target and target.Character then
+                        local head = target.Character:FindFirstChild("Head")
+                        if head and head:IsA("BasePart") then
+                            local rightHand = player.Character and player.Character:FindFirstChild("RightHand")
+                            if rightHand and rightHand:IsA("BasePart") then
+                                local weld = states.gluedHeads[display]
+                                if not weld or not weld.Parent then
+                                    weld = Instance.new("WeldConstraint")
+                                    weld.Part0 = rightHand
+                                    weld.Part1 = head
+                                    weld.Parent = head
+                                    states.gluedHeads[display] = weld
+                                end
+                            end
+                        end
+                    end
+                end
+                -- Equip Punch and unequip other tools
+                local char = player.Character
+                if char then
+                    local punch = getPunch()
+                    if punch and punch.Parent ~= char then
+                        punch.Parent = char
+                    end
+                    local bp = player:FindFirstChild("Backpack")
+                    if bp then
+                        for _, tool in ipairs(char:GetChildren()) do
+                            if tool:IsA("Tool") and tool.Name ~= "Punch" then
+                                tool.Parent = bp
+                            end
+                        end
+                    end
+                    -- Fire right hand remote continuously
+                    player.muscleEvent:FireServer("punch", "rightHand")
+                end
+                task.wait(0.1)
+            end
+            -- Cleanup welds when toggle off
+            for display, weld in pairs(states.gluedHeads) do
+                if weld and weld.Parent then weld:Destroy() end
+            end
+            table.clear(states.gluedHeads)
+        end)
+    else
+        if states.killHeadLoop then task.cancel(states.killHeadLoop); states.killHeadLoop = nil end
+        for display, weld in pairs(states.gluedHeads) do
+            if weld and weld.Parent then weld:Destroy() end
+        end
+        table.clear(states.gluedHeads)
+    end
+    return val
+end)
+
+local killEveryoneToggle = createToggle(f_killer, "Kill Everyone", "killEveryone", function(val)
+    states.killEveryoneEnabled = val
+    if val then
+        if states.killEveryoneLoop then task.cancel(states.killEveryoneLoop) end
+        states.killEveryoneLoop = task.spawn(function()
+            while states.killEveryoneEnabled do
+                if states.stopEverything then break end
+                for _, plr in ipairs(Players:GetPlayers()) do
+                    if plr ~= player then
+                        local display = getPlayerDisplayName(plr)
+                        -- Skip if whitelisted
+                        if not states.whitelistedPlayers[display] then
+                            killPlayer(plr)
+                            task.wait(0.2)
+                        end
+                    end
+                end
+                task.wait(1)
+            end
+        end)
+    else
+        if states.killEveryoneLoop then task.cancel(states.killEveryoneLoop); states.killEveryoneLoop = nil end
+    end
+    return val
+end)
+
+local autoGoodKarmaToggle = createToggle(f_killer, "Auto Good Karma", "autoGoodKarma", function(val)
+    states.autoGoodKarmaEnabled = val
+    if val then
+        if states.autoKarmaLoop then task.cancel(states.autoKarmaLoop) end
+        states.autoKarmaLoop = task.spawn(function()
+            while states.autoGoodKarmaEnabled or states.autoEvilKarmaEnabled do
+                if states.stopEverything then break end
+                for _, plr in ipairs(Players:GetPlayers()) do
+                    if plr == player then continue end
+                    local display = getPlayerDisplayName(plr)
+                    if states.whitelistedPlayers[display] then
+                        continue
+                    end
+                    local goodKarma = plr:FindFirstChild("goodKarma") and plr.goodKarma.Value or 0
+                    local evilKarma = plr:FindFirstChild("evilKarma") and plr.evilKarma.Value or 0
+                    if states.autoGoodKarmaEnabled and evilKarma > goodKarma then
+                        killPlayer(plr)
+                        task.wait(0.3)
+                    elseif states.autoEvilKarmaEnabled and goodKarma > evilKarma then
+                        killPlayer(plr)
+                        task.wait(0.3)
+                    end
+                end
+                task.wait(2)
+            end
+        end)
+    elseif not states.autoEvilKarmaEnabled then
+        if states.autoKarmaLoop then task.cancel(states.autoKarmaLoop); states.autoKarmaLoop = nil end
+    end
+    return val
+end)
+
+local autoEvilKarmaToggle = createToggle(f_killer, "Auto Evil Karma", "autoEvilKarma", function(val)
+    states.autoEvilKarmaEnabled = val
+    if val then
+        if states.autoKarmaLoop then task.cancel(states.autoKarmaLoop) end
+        states.autoKarmaLoop = task.spawn(function()
+            while states.autoGoodKarmaEnabled or states.autoEvilKarmaEnabled do
+                if states.stopEverything then break end
+                for _, plr in ipairs(Players:GetPlayers()) do
+                    if plr == player then continue end
+                    local display = getPlayerDisplayName(plr)
+                    if states.whitelistedPlayers[display] then
+                        continue
+                    end
+                    local goodKarma = plr:FindFirstChild("goodKarma") and plr.goodKarma.Value or 0
+                    local evilKarma = plr:FindFirstChild("evilKarma") and plr.evilKarma.Value or 0
+                    if states.autoGoodKarmaEnabled and evilKarma > goodKarma then
+                        killPlayer(plr)
+                        task.wait(0.3)
+                    elseif states.autoEvilKarmaEnabled and goodKarma > evilKarma then
+                        killPlayer(plr)
+                        task.wait(0.3)
+                    end
+                end
+                task.wait(2)
+            end
+        end)
+    elseif not states.autoGoodKarmaEnabled then
+        if states.autoKarmaLoop then task.cancel(states.autoKarmaLoop); states.autoKarmaLoop = nil end
+    end
+    return val
+end)
+
+-- Initial population of dropdowns
+updatePlayerDropdownOptions()
 
 -- ==================== MAIN LOOPS ====================
 table.insert(getgenv().ML_Expert_Loops, RunService.Heartbeat:Connect(function()
@@ -2951,68 +2927,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- ==================== MODIFIED KILLER LOOP (WITH FILE PERSISTENCE) ====================
-table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
-    while true do
-        if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
-        if states.stopEverything then continue end
-        local char = player.Character
-        if not char then continue end
-        local root, hum = char:FindFirstChild("HumanoidRootPart"), char:FindFirstChild("Humanoid")
-        if not root or not hum or hum.Health <= 0 then continue end
-
-        -- Update kill system active status
-        updateKillSystemActive()
-
-        -- Only perform killing if the system is active
-        if states.killSystemActive then
-            local myRightHand = char:FindFirstChild("RightHand") or char:FindFirstChild("Right Arm")
-            if myRightHand then 
-                for _, p in ipairs(Players:GetPlayers()) do 
-                    if p ~= player and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
-                        local shouldKill = false
-                        if states.killEveryone and not states.whitelist[p.Name] then shouldKill = true
-                        elseif states.killActive and states.killTargets[p.Name] then shouldKill = true
-                        elseif states.autoGoodKarma and (p:FindFirstChild("evilKarma") and p.evilKarma.Value > (p:FindFirstChild("goodKarma") and p.goodKarma.Value or 0)) then shouldKill = true
-                        elseif states.autoEvilKarma and (p:FindFirstChild("goodKarma") and p.goodKarma.Value > (p:FindFirstChild("evilKarma") and p.evilKarma.Value or 0)) then shouldKill = true
-                        end
-                        
-                        if shouldKill and not states.whitelist[p.Name] then 
-                            -- Save and disable attachments if not already saved for this victim
-                            if not states.victimFileData or not states.victimFileData[p] then
-                                saveAndDisableVictimAttachments(p)
-                            end
-                            
-                            local victimHead = p.Character:FindFirstChild("Head")
-                            if victimHead then
-                                pcall(function()
-                                    victimHead.CFrame = myRightHand.CFrame
-                                    victimHead.AssemblyLinearVelocity = Vector3.zero
-                                    victimHead.AssemblyAngularVelocity = Vector3.zero
-                                end)
-                            end
-                            pcall(function()
-                                player.muscleEvent:FireServer("punch", "rightHand")
-                            end)
-                        end
-                    end
-                end
-            end
-        end
-    end
-end))
-
--- Clean up victim data when a player leaves
-Players.PlayerRemoving:Connect(function(plr)
-    if states.victimFileData and states.victimFileData[plr] then
-        restoreVictimFromFiles(plr)
-    end
-end)
-
--- ==================== RESTORE LEFTOVER ATTACHMENTS ON SCRIPT START ====================
-restoreAllLeftoverAttachments()
-
--- ==================== OTHER LOOPS (Unchanged) ====================
+-- ==================== OTHER LOOPS ====================
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function() 
     while true do 
         if states.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
@@ -3155,9 +3070,8 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             end
         end
         nameMap = currentMap
-        pKillDD.refresh(killList)
-        whiteDD.refresh(killList)
         statsPlayerDD.refresh(statsList) 
+        updatePlayerDropdownOptions()
     end
 end))
 
@@ -3221,7 +3135,9 @@ local function onUnload()
             rock.Anchored = data.Anchored
         end
     end
-    cleanupAllAttachmentFiles()  -- Clean up all files on script unload
+    for display, weld in pairs(states.gluedHeads) do
+        if weld and weld.Parent then weld:Destroy() end
+    end
 end
 task.spawn(function()
     while true do
