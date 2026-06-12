@@ -73,19 +73,13 @@ local states = {
     walkOnWater = true,
     selectedTreadmill = nil, autoTreadmill = false, autoTreadmillThread = nil,
     leaderboardData = {},
-    -- KILLER TAB STATE
-    killEnabled = false,
-    killEveryoneEnabled = false,
-    autoGoodKarmaEnabled = false,
-    autoEvilKarmaEnabled = false,
-    whitelistFriendsEnabled = false,
-    selectedPlayers = {},   -- table of player names (display name)
-    whitelistedPlayers = {}, -- table of player names (display name)
-    gluedHeads = {},        -- map of player -> weld object for head gluing
-    autoKarmaLoop = nil,
-    killHeadLoop = nil,
-    killEveryoneLoop = nil,
-    friendsList = {}        -- cached friends user ids
+    -- Killer tab states
+    selectedPlayers = {},         -- multi-select list of player objects
+    whitelistPlayers = {},        -- multi-select list of player objects
+    whitelistFriends = false,     -- auto whitelist friends toggle
+    killActive = false,
+    killEveryoneActive = false,
+    affectedPlayers = {}          -- track players currently affected by kill (for revert)
 }
 
 local rockCache = {}
@@ -101,6 +95,37 @@ local toggleButtons = {}
 local dropdownSetters = {}
 local dropdownHeaderSetters = {}
 
+-- Friend list caching
+local friendUserIds = {}
+local function updateFriendList()
+    pcall(function()
+        local success, friends = pcall(function() return Players:GetFriendsAsync(player.UserId) end)
+        if success and friends then
+            friendUserIds = {}
+            for _, friend in ipairs(friends) do
+                friendUserIds[friend.Id] = true
+            end
+        end
+    end)
+end
+updateFriendList()
+-- Refresh friends periodically
+task.spawn(function()
+    while true do
+        task.wait(300)
+        updateFriendList()
+    end
+end)
+
+local function isFriend(plr)
+    return friendUserIds[plr.UserId] == true
+end
+
+-- Helper to get display string for a player
+local function getPlayerDisplayString(plr)
+    return plr.Name .. " (" .. plr.DisplayName .. ") (Friend?:" .. (isFriend(plr) and "Yes" or "No") .. ")"
+end
+
 -- ==================== ROCK DATA ====================
 local rockData = {
     ["Tiny Rock"]        = {req = 0,       name = "Tiny Rock",           idx = 1, glitchValue = 0.025},
@@ -115,7 +140,7 @@ local rockData = {
     ["Jungle Rock"]      = {req = 10000000,name = "Ancient Jungle Rock", idx = 1, glitchValue = 16.25}
 }
 
--- Gym data
+-- Gym data (unchanged)
 local gymData = {
     ["Tiny Island"] = {
         ["Bench Press"] = {pos = Vector3.new(67.105286, 6.714245, 1984.269043), cost = 10},
@@ -756,6 +781,115 @@ local function createConfirmPopup(message, onConfirm)
         popup:Destroy()
         onConfirm(false)
     end)
+end
+
+-- Enhanced dropdown that supports multi-selection
+local function createMultiDropdown(parent, text, multi, callbackGetDisplay, callbackOnToggle, initialSelections)
+    local container = Instance.new("Frame", parent)
+    container.Size = UDim2.new(1, -10, 0, 30)
+    container.BackgroundTransparency = 1
+    
+    local headerText = Instance.new("TextLabel", container)
+    headerText.Size = UDim2.new(1, 0, 0, 30)
+    headerText.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    headerText.Text = text .. " (0 selected) v"
+    headerText.TextColor3 = Color3.new(1, 1, 1)
+    headerText.Active = true
+    
+    local headerBtn = Instance.new("TextButton", container)
+    headerBtn.Size = UDim2.new(1, 0, 0, 30)
+    headerBtn.BackgroundTransparency = 1
+    headerBtn.Text = ""
+    headerBtn.ZIndex = 12
+    
+    local list = Instance.new("ScrollingFrame", container)
+    list.Position = UDim2.fromOffset(0, 30)
+    list.Visible = false
+    list.ZIndex = 10
+    list.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    list.ScrollBarThickness = isMobile and 6 or 4
+    list.ScrollingEnabled = true
+    list.ClipsDescendants = true
+    list.ElasticBehavior = Enum.ElasticBehavior.WhenScrollable
+    
+    local selected = initialSelections or {}
+    local optionsMap = {} -- store player objects by display string
+    local currentOptions = {}
+    
+    local function updateHeader()
+        local count = 0
+        for _, v in pairs(selected) do if v then count = count + 1 end end
+        headerText.Text = text .. " (" .. count .. " selected) v"
+    end
+    
+    headerBtn.MouseButton1Click:Connect(function()
+        list.Visible = not list.Visible
+        local listHeight = math.min(#currentOptions * 25, 150)
+        container.Size = list.Visible and UDim2.new(1, -10, 0, listHeight + 30) or UDim2.new(1, -10, 0, 30)
+        list.Size = UDim2.new(1, 0, 0, listHeight)
+        list.CanvasSize = UDim2.new(0, 0, 0, #currentOptions * 25)
+    end)
+    
+    local function refresh(newOptionsMap, newOptionsList)
+        optionsMap = newOptionsMap
+        currentOptions = newOptionsList or {}
+        -- clear existing buttons
+        for _, v in ipairs(list:GetChildren()) do v:Destroy() end
+        for i, optStr in ipairs(currentOptions) do
+            local plr = optionsMap[optStr]
+            local o = Instance.new("TextButton", list)
+            o.Size = UDim2.new(1, 0, 0, 25)
+            o.Position = UDim2.fromOffset(0, (i-1)*25)
+            o.Text = optStr
+            o.TextColor3 = Color3.new(1, 1, 1)
+            o.ZIndex = 11
+            local isSelected = selected[plr] == true
+            o.BackgroundColor3 = isSelected and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(60, 60, 60)
+            
+            o.MouseButton1Click:Connect(function()
+                local newState = not selected[plr]
+                selected[plr] = newState
+                o.BackgroundColor3 = newState and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(60, 60, 60)
+                if callbackOnToggle then callbackOnToggle(plr, newState) end
+                updateHeader()
+            end)
+        end
+        updateHeader()
+        local listHeight = math.min(#currentOptions * 25, 150)
+        if list.Visible then
+            container.Size = UDim2.new(1, -10, 0, listHeight + 30)
+            list.Size = UDim2.new(1, 0, 0, listHeight)
+        end
+        list.CanvasSize = UDim2.new(0, 0, 0, #currentOptions * 25)
+    end
+    
+    local function setSelections(selectionTable)
+        selected = {}
+        for plr, state in pairs(selectionTable) do
+            if state then selected[plr] = true end
+        end
+        -- refresh button backgrounds
+        for _, btn in ipairs(list:GetChildren()) do
+            if btn:IsA("TextButton") then
+                local plr = optionsMap[btn.Text]
+                if plr then
+                    btn.BackgroundColor3 = selected[plr] and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(60, 60, 60)
+                end
+            end
+        end
+        updateHeader()
+    end
+    
+    local function getSelected()
+        local result = {}
+        for plr, state in pairs(selected) do
+            if state then table.insert(result, plr) end
+        end
+        return result
+    end
+    
+    refresh({}, {})
+    return { refresh = refresh, setSelections = setSelections, getSelected = getSelected, setHeaderText = function(txt) headerText.Text = txt end }
 end
 
 local function createDropdown(parent, text, options, multi, callback, checkStateFunc)
@@ -1442,7 +1576,6 @@ end)
 -- ==================== TAB 5: AUTO TREADMILL ====================
 local f5 = frames["Auto Treadmill"]
 
--- Ordered list to guarantee clean display order (EXP 1 → 8)
 local treadmillOrder = {
     "Tiny Treadmill",
     "Small Treadmill",
@@ -2285,320 +2418,283 @@ removeConfigBtn.MouseButton1Click:Connect(function()
 end)
 
 -- ==================== TAB 12: KILLER ====================
-local f_killer = frames["Killer"]
+local killerTab = frames["Killer"]
 
--- Helper: get display name for a player object
-local function getPlayerDisplayName(plr)
-    return plr.DisplayName .. " (@" .. plr.Name .. ")"
-end
-
--- Helper: get player object from display name string
-local function getPlayerFromDisplay(display)
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if getPlayerDisplayName(plr) == display then
-            return plr
+-- Multi-select Player Dropdown
+local playerDropdown = createMultiDropdown(killerTab, "Players", true, nil, 
+    function(plr, selected)
+        if selected then
+            states.selectedPlayers[plr] = true
+        else
+            states.selectedPlayers[plr] = nil
         end
-    end
-    return nil
-end
+    end,
+    {}
+)
 
--- Helper: kill a player (fire muscleEvent to kill)
-local function killPlayer(targetPlayer)
-    if not targetPlayer or targetPlayer == player then return end
-    pcall(function()
-        -- Use the same method as auto glitch: muscleEvent:FireServer("punch", "rightHand")
-        -- But to kill we may need to ensure we are close and have punch tool equipped
-        local char = player.Character
-        if not char then return end
-        local punch = getPunch()
-        if punch and punch.Parent ~= char then
-            punch.Parent = char
+-- Multi-select Whitelist Dropdown
+local whitelistDropdown = createMultiDropdown(killerTab, "Whitelist", true, nil,
+    function(plr, selected)
+        if selected then
+            states.whitelistPlayers[plr] = true
+        else
+            states.whitelistPlayers[plr] = nil
         end
-        -- Teleport to target
-        if targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
-            local targetRoot = targetPlayer.Character.HumanoidRootPart
-            if char:FindFirstChild("HumanoidRootPart") then
-                char.HumanoidRootPart.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 3)
+    end,
+    {}
+)
+
+-- Whitelist Friends Toggle
+local whitelistFriendsToggle = createToggle(killerTab, "Whitelist Friends", nil, function(val)
+    states.whitelistFriends = val
+    if val then
+        -- auto-select all friends into whitelist
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= player and isFriend(plr) then
+                states.whitelistPlayers[plr] = true
             end
         end
-        task.wait(0.1)
-        player.muscleEvent:FireServer("punch", "rightHand")
-    end)
-end
+        refreshWhitelistDropdown()
+    else
+        -- remove all friends from whitelist
+        for plr in pairs(states.whitelistPlayers) do
+            if isFriend(plr) then
+                states.whitelistPlayers[plr] = nil
+            end
+        end
+        refreshWhitelistDropdown()
+    end
+    return val
+end)
 
--- Function to update player dropdown options
-local function updatePlayerDropdownOptions()
+local killToggle = createToggle(killerTab, "Kill", nil, function(val)
+    states.killActive = val
+    if val then
+        killSelectedPlayers()
+    else
+        -- Revert any affected players (optional: restore attachments, but we'll just remove effect)
+        for plr in pairs(states.affectedPlayers) do
+            revertKillEffect(plr)
+        end
+        states.affectedPlayers = {}
+    end
+    return val
+end)
+
+local killEveryoneToggle = createToggle(killerTab, "Kill Everyone", nil, function(val)
+    states.killEveryoneActive = val
+    if val then
+        killEveryone()
+    end
+    return val
+end)
+
+-- Auto Good Karma
+local autoGoodKarmaToggle = createToggle(killerTab, "Auto Good Karma", nil, function(val)
+    states.autoGoodKarma = val
+    return val
+end)
+
+-- Auto Evil Karma
+local autoEvilKarmaToggle = createToggle(killerTab, "Auto Evil Karma", nil, function(val)
+    states.autoEvilKarma = val
+    return val
+end)
+
+-- Helper to refresh player dropdown with current players
+local function refreshPlayerDropdown()
     local options = {}
+    local optionsMap = {}
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= player then
-            table.insert(options, getPlayerDisplayName(plr))
+            local display = getPlayerDisplayString(plr)
+            table.insert(options, display)
+            optionsMap[display] = plr
         end
     end
     if #options == 0 then
         table.insert(options, "No other players")
+        optionsMap["No other players"] = nil
     end
-    playerDropdown.refresh(options)
-    whitelistDropdown.refresh(options)
-end
-
--- Function to handle multi-select for player dropdown
-local function togglePlayerSelection(displayName)
-    if displayName == "No other players" then return false end
-    if states.selectedPlayers[displayName] then
-        states.selectedPlayers[displayName] = nil
-    else
-        states.selectedPlayers[displayName] = true
-    end
-    return states.selectedPlayers[displayName] or false
-end
-
--- Function to handle multi-select for whitelist dropdown
-local function toggleWhitelistSelection(displayName)
-    if displayName == "No other players" then return false end
-    if states.whitelistedPlayers[displayName] then
-        states.whitelistedPlayers[displayName] = nil
-    else
-        states.whitelistedPlayers[displayName] = true
-    end
-    -- If friends toggle is on, also update friends list automatically? We'll handle separately.
-    return states.whitelistedPlayers[displayName] or false
-end
-
--- Function to get friends list (uses Roblox API, may fail, but we try)
-local function fetchFriendsList()
-    local success, result = pcall(function()
-        local url = "https://friends.roblox.com/v1/users/" .. player.UserId .. "/friends"
-        local data = game:HttpGet(url)
-        return HttpService:JSONDecode(data)
-    end)
-    if success and result and result.data then
-        local friendIds = {}
-        for _, friend in ipairs(result.data) do
-            friendIds[friend.id] = true
+    playerDropdown.refresh(optionsMap, options)
+    -- Update selected players: remove those who left
+    for plr in pairs(states.selectedPlayers) do
+        if not plr.Parent then
+            states.selectedPlayers[plr] = nil
         end
-        return friendIds
     end
-    return {}
+    playerDropdown.setSelections(states.selectedPlayers)
 end
 
--- Function to update whitelist with friends
-local function updateWhitelistWithFriends()
-    if not states.whitelistFriendsEnabled then return end
-    local friendIds = fetchFriendsList()
+local function refreshWhitelistDropdown()
+    local options = {}
+    local optionsMap = {}
     for _, plr in ipairs(Players:GetPlayers()) do
-        if friendIds[plr.UserId] then
-            local display = getPlayerDisplayName(plr)
-            states.whitelistedPlayers[display] = true
+        if plr ~= player then
+            local display = getPlayerDisplayString(plr)
+            table.insert(options, display)
+            optionsMap[display] = plr
         end
     end
-    whitelistDropdown.refresh(whitelistDropdown.optionsList)
+    if #options == 0 then
+        table.insert(options, "No other players")
+        optionsMap["No other players"] = nil
+    end
+    whitelistDropdown.refresh(optionsMap, options)
+    -- Clean removed players from whitelist
+    for plr in pairs(states.whitelistPlayers) do
+        if not plr.Parent then
+            states.whitelistPlayers[plr] = nil
+        end
+    end
+    whitelistDropdown.setSelections(states.whitelistPlayers)
 end
 
--- Handle new player join for friends whitelist
-Players.PlayerAdded:Connect(function(newPlayer)
-    updatePlayerDropdownOptions()
-    if states.whitelistFriendsEnabled then
-        local friendIds = fetchFriendsList()
-        if friendIds[newPlayer.UserId] then
-            local display = getPlayerDisplayName(newPlayer)
-            states.whitelistedPlayers[display] = true
-            whitelistDropdown.refresh(whitelistDropdown.optionsList)
+-- Kill effect function
+local function applyKillEffect(targetPlr)
+    if not targetPlr.Character then return end
+    local char = targetPlr.Character
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local head = char:FindFirstChild("Head")
+    local rightHand = player.Character and (player.Character:FindFirstChild("RightHand") or player.Character:FindFirstChild("Right Arm"))
+    if not rightHand or not hrp then return end
+    
+    -- Teleport head to right hand (or whole body if head missing)
+    local targetPart = head or hrp
+    local cframeTarget = rightHand.CFrame
+    targetPart.CFrame = cframeTarget
+    
+    -- Disable attachments (remove accessories)
+    for _, child in ipairs(char:GetChildren()) do
+        if child:IsA("Accessory") or child:IsA("Hat") or child:IsA("Clothing") then
+            child:Destroy()
         end
     end
-end)
-
-Players.PlayerRemoving:Connect(function(leavingPlayer)
-    updatePlayerDropdownOptions()
-    local display = getPlayerDisplayName(leavingPlayer)
-    states.selectedPlayers[display] = nil
-    states.whitelistedPlayers[display] = nil
-    -- Also remove any glued head for that player
-    if states.gluedHeads[display] then
-        local weld = states.gluedHeads[display]
-        if weld and weld.Parent then weld:Destroy() end
-        states.gluedHeads[display] = nil
+    
+    -- Kill the player (set health to 0)
+    local hum = char:FindFirstChild("Humanoid")
+    if hum then
+        hum.Health = 0
     end
-end)
+    
+    -- Mark as affected for potential revert
+    states.affectedPlayers[targetPlr] = true
+end
 
--- Create UI elements for Killer tab
-local playerDropdown = createDropdown(f_killer, "Select Players", {"No other players"}, true, function(display)
-    return togglePlayerSelection(display)
-end)
+local function revertKillEffect(targetPlr)
+    -- Since player might respawn, we just clear flag; actual revert not needed
+    states.affectedPlayers[targetPlr] = nil
+end
 
-local whitelistDropdown = createDropdown(f_killer, "Whitelist Players", {"No other players"}, true, function(display)
-    return toggleWhitelistSelection(display)
-end)
-
-local whitelistFriendsToggle = createToggle(f_killer, "Whitelist Friends", "whitelistFriends", function(val)
-    states.whitelistFriendsEnabled = val
-    if val then
-        updateWhitelistWithFriends()
-    end
-    return val
-end)
-
-local killToggle = createToggle(f_killer, "Kill", "killToggle", function(val)
-    states.killEnabled = val
-    if val then
-        -- Ensure we have at least one selected player
-        local hasSelected = false
-        for _ in pairs(states.selectedPlayers) do hasSelected = true; break end
-        if not hasSelected then
-            return false
+local function killSelectedPlayers()
+    for plr in pairs(states.selectedPlayers) do
+        if plr and plr.Parent and plr ~= player then
+            applyKillEffect(plr)
         end
-        -- Start head gluing loop for selected players
-        if states.killHeadLoop then task.cancel(states.killHeadLoop) end
-        states.killHeadLoop = task.spawn(function()
-            while states.killEnabled do
-                if states.stopEverything then break end
-                -- For each selected player, glue their head to our right hand
-                for display, _ in pairs(states.selectedPlayers) do
-                    local target = getPlayerFromDisplay(display)
-                    if target and target.Character then
-                        local head = target.Character:FindFirstChild("Head")
-                        if head and head:IsA("BasePart") then
-                            local rightHand = player.Character and player.Character:FindFirstChild("RightHand")
-                            if rightHand and rightHand:IsA("BasePart") then
-                                local weld = states.gluedHeads[display]
-                                if not weld or not weld.Parent then
-                                    weld = Instance.new("WeldConstraint")
-                                    weld.Part0 = rightHand
-                                    weld.Part1 = head
-                                    weld.Parent = head
-                                    states.gluedHeads[display] = weld
-                                end
-                            end
-                        end
-                    end
-                end
-                -- Equip Punch and unequip other tools
-                local char = player.Character
-                if char then
-                    local punch = getPunch()
-                    if punch and punch.Parent ~= char then
-                        punch.Parent = char
-                    end
-                    local bp = player:FindFirstChild("Backpack")
-                    if bp then
-                        for _, tool in ipairs(char:GetChildren()) do
-                            if tool:IsA("Tool") and tool.Name ~= "Punch" then
-                                tool.Parent = bp
-                            end
-                        end
-                    end
-                    -- Fire right hand remote continuously
-                    player.muscleEvent:FireServer("punch", "rightHand")
-                end
-                task.wait(0.1)
-            end
-            -- Cleanup welds when toggle off
-            for display, weld in pairs(states.gluedHeads) do
-                if weld and weld.Parent then weld:Destroy() end
-            end
-            table.clear(states.gluedHeads)
-        end)
-    else
-        if states.killHeadLoop then task.cancel(states.killHeadLoop); states.killHeadLoop = nil end
-        for display, weld in pairs(states.gluedHeads) do
-            if weld and weld.Parent then weld:Destroy() end
+    end
+end
+
+local function killEveryone()
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= player and not states.whitelistPlayers[plr] then
+            applyKillEffect(plr)
         end
-        table.clear(states.gluedHeads)
     end
-    return val
-end)
+end
 
-local killEveryoneToggle = createToggle(f_killer, "Kill Everyone", "killEveryone", function(val)
-    states.killEveryoneEnabled = val
-    if val then
-        if states.killEveryoneLoop then task.cancel(states.killEveryoneLoop) end
-        states.killEveryoneLoop = task.spawn(function()
-            while states.killEveryoneEnabled do
-                if states.stopEverything then break end
-                for _, plr in ipairs(Players:GetPlayers()) do
-                    if plr ~= player then
-                        local display = getPlayerDisplayName(plr)
-                        -- Skip if whitelisted
-                        if not states.whitelistedPlayers[display] then
-                            killPlayer(plr)
-                            task.wait(0.2)
-                        end
-                    end
-                end
-                task.wait(1)
+-- Auto Karma checks (runs periodically)
+local function checkAndKillByKarma()
+    if not (states.autoGoodKarma or states.autoEvilKarma) then return end
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= player and not states.whitelistPlayers[plr] then
+            local goodKarma = plr:FindFirstChild("goodKarma") and plr.goodKarma.Value or 0
+            local evilKarma = plr:FindFirstChild("evilKarma") and plr.evilKarma.Value or 0
+            if states.autoGoodKarma and evilKarma > goodKarma then
+                applyKillEffect(plr)
+            elseif states.autoEvilKarma and goodKarma > evilKarma then
+                applyKillEffect(plr)
             end
-        end)
-    else
-        if states.killEveryoneLoop then task.cancel(states.killEveryoneLoop); states.killEveryoneLoop = nil end
+        end
     end
-    return val
+end
+
+-- Live update for dropdowns when players join/leave
+Players.PlayerAdded:Connect(function(plr)
+    refreshPlayerDropdown()
+    refreshWhitelistDropdown()
+    if states.whitelistFriends and isFriend(plr) then
+        states.whitelistPlayers[plr] = true
+        refreshWhitelistDropdown()
+    end
+    if states.killEveryoneActive then
+        killEveryone()
+    end
 end)
 
-local autoGoodKarmaToggle = createToggle(f_killer, "Auto Good Karma", "autoGoodKarma", function(val)
-    states.autoGoodKarmaEnabled = val
-    if val then
-        if states.autoKarmaLoop then task.cancel(states.autoKarmaLoop) end
-        states.autoKarmaLoop = task.spawn(function()
-            while states.autoGoodKarmaEnabled or states.autoEvilKarmaEnabled do
-                if states.stopEverything then break end
-                for _, plr in ipairs(Players:GetPlayers()) do
-                    if plr == player then continue end
-                    local display = getPlayerDisplayName(plr)
-                    if states.whitelistedPlayers[display] then
-                        continue
-                    end
-                    local goodKarma = plr:FindFirstChild("goodKarma") and plr.goodKarma.Value or 0
-                    local evilKarma = plr:FindFirstChild("evilKarma") and plr.evilKarma.Value or 0
-                    if states.autoGoodKarmaEnabled and evilKarma > goodKarma then
-                        killPlayer(plr)
-                        task.wait(0.3)
-                    elseif states.autoEvilKarmaEnabled and goodKarma > evilKarma then
-                        killPlayer(plr)
-                        task.wait(0.3)
-                    end
-                end
-                task.wait(2)
-            end
-        end)
-    elseif not states.autoEvilKarmaEnabled then
-        if states.autoKarmaLoop then task.cancel(states.autoKarmaLoop); states.autoKarmaLoop = nil end
+Players.PlayerRemoving:Connect(function(plr)
+    refreshPlayerDropdown()
+    refreshWhitelistDropdown()
+    if states.selectedPlayers[plr] then
+        states.selectedPlayers[plr] = nil
+        playerDropdown.setSelections(states.selectedPlayers)
     end
-    return val
+    if states.whitelistPlayers[plr] then
+        states.whitelistPlayers[plr] = nil
+        whitelistDropdown.setSelections(states.whitelistPlayers)
+    end
 end)
 
-local autoEvilKarmaToggle = createToggle(f_killer, "Auto Evil Karma", "autoEvilKarma", function(val)
-    states.autoEvilKarmaEnabled = val
-    if val then
-        if states.autoKarmaLoop then task.cancel(states.autoKarmaLoop) end
-        states.autoKarmaLoop = task.spawn(function()
-            while states.autoGoodKarmaEnabled or states.autoEvilKarmaEnabled do
-                if states.stopEverything then break end
-                for _, plr in ipairs(Players:GetPlayers()) do
-                    if plr == player then continue end
-                    local display = getPlayerDisplayName(plr)
-                    if states.whitelistedPlayers[display] then
-                        continue
-                    end
-                    local goodKarma = plr:FindFirstChild("goodKarma") and plr.goodKarma.Value or 0
-                    local evilKarma = plr:FindFirstChild("evilKarma") and plr.evilKarma.Value or 0
-                    if states.autoGoodKarmaEnabled and evilKarma > goodKarma then
-                        killPlayer(plr)
-                        task.wait(0.3)
-                    elseif states.autoEvilKarmaEnabled and goodKarma > evilKarma then
-                        killPlayer(plr)
-                        task.wait(0.3)
-                    end
-                end
-                task.wait(2)
-            end
-        end)
-    elseif not states.autoGoodKarmaEnabled then
-        if states.autoKarmaLoop then task.cancel(states.autoKarmaLoop); states.autoKarmaLoop = nil end
+-- Kill toggle loop: if killActive true, continuously kill selected players (or only once per toggle, but user may want repeated). We'll do it once per toggle, but also if new players get selected while killActive is on, we should kill them. So we'll add a loop that checks periodically.
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        if states.killActive then
+            killSelectedPlayers()
+        end
+        if states.killEveryoneActive then
+            killEveryone()
+        end
+        checkAndKillByKarma()
     end
-    return val
 end)
 
--- Initial population of dropdowns
-updatePlayerDropdownOptions()
+-- Also, to ensure that when kill toggle is off, we don't keep killing but we already revert on off.
+
+-- Ensure right hand remote firing (fire right hand from auto glitch remote) - we'll integrate into kill effect
+-- The game likely has a remote for right hand glitch: ReplicatedStorage.rEvents.glitchRemote or similar.
+-- Since original script uses player.muscleEvent:FireServer("punch", hand), we'll use that to fire right hand.
+local function fireRightHandRemote()
+    pcall(function()
+        player.muscleEvent:FireServer("punch", "rightHand")
+    end)
+end
+
+-- Modify applyKillEffect to also fire right hand remote
+local originalApplyKillEffect = applyKillEffect
+applyKillEffect = function(targetPlr)
+    originalApplyKillEffect(targetPlr)
+    fireRightHandRemote()
+    -- Keep Punch tool equipped and unequip others
+    local punch = getPunch()
+    if punch and punch.Parent ~= player.Character then
+        pcall(function()
+            player.Character.Humanoid:EquipTool(punch)
+        end)
+    end
+    for _, tool in ipairs(player.Character:GetChildren()) do
+        if tool:IsA("Tool") and tool ~= punch then
+            pcall(function() tool.Parent = player.Backpack end)
+        end
+    end
+end
+
+-- Initial refresh
+refreshPlayerDropdown()
+refreshWhitelistDropdown()
+
+-- Add some padding at bottom
+local padding = Instance.new("UIPadding", killerTab)
+padding.PaddingBottom = UDim.new(0, 10)
 
 -- ==================== MAIN LOOPS ====================
 table.insert(getgenv().ML_Expert_Loops, RunService.Heartbeat:Connect(function()
@@ -3071,7 +3167,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         end
         nameMap = currentMap
         statsPlayerDD.refresh(statsList) 
-        updatePlayerDropdownOptions()
     end
 end))
 
@@ -3134,9 +3229,6 @@ local function onUnload()
             rock.CFrame = data.CFrame
             rock.Anchored = data.Anchored
         end
-    end
-    for display, weld in pairs(states.gluedHeads) do
-        if weld and weld.Parent then weld:Destroy() end
     end
 end
 task.spawn(function()
