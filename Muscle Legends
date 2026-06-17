@@ -92,7 +92,6 @@ local ui = {
     toggleButtons = {},
     dropdownSetters = {},
     dropdownHeaderSetters = {},
-    -- individual UI elements will be added here
 }
 
 -- ==================== KILLER STATE ====================
@@ -121,7 +120,7 @@ local activeKillTargets = {} -- [username] = true (we just track to restore late
 -- ==================== ATTACHMENT MANAGEMENT ====================
 local targetAttachmentData = {} -- [username] = { stored = { {Instance, OriginalParent}, ... }, disabled = false }
 
--- NEW: Store CharacterAdded connections externally, not on Player objects
+-- Store CharacterAdded connections externally, not on Player objects
 local playerConnections = {}    -- [username] = RBXScriptConnection
 
 local function disableAttachmentsForPlayer(username)
@@ -178,7 +177,6 @@ end
 -- Handle character respawn while targeted (now uses playerConnections table)
 local function onCharacterAdded(username, char)
     if not username then return end
-    -- If this player is currently targeted, re-disable attachments on next loop
     if targetAttachmentData[username] then
         targetAttachmentData[username].needReDisable = true
     end
@@ -1985,9 +1983,12 @@ end)
 -- ==================== TAB 9: TELEPORT ====================
 local f9 = frames["Teleport"]
 
+-- Tiny Island position used later for killer teleports
+local TINY_ISLAND_POS = Vector3.new(-33.693745, 7.456870, 1892.807007)
+
 local teleportList = {
     {name = "Safe Spot", pos = Vector3.new(218.565002, 41.153748, -8129.369629)},
-    {name = "Tiny Island", pos = Vector3.new(-33.693745, 7.456870, 1892.807007)},
+    {name = "Tiny Island", pos = TINY_ISLAND_POS},
     {name = "Beach", pos = Vector3.new(4.466469, 7.303733, 132.878891)},
     {name = "Frozen Island", pos = Vector3.new(-2623.022217, 7.303728, -409.073334)},
     {name = "Mystic Island", pos = Vector3.new(2250.778076, 7.303732, 1073.226685)},
@@ -2553,7 +2554,7 @@ ui.autoEvilKarmaToggle = createToggle(f_killer, "Auto Evil Karma", "autoEvilKarm
     return val
 end)
 
--- ==================== KILLER LOOPS (with Attachment Management fixed) ====================
+-- ==================== KILLER LOOPS (with Attachment Management + Tiny Island Teleport) ====================
 local prevEffective = {}
 
 -- Main kill loop
@@ -2572,17 +2573,27 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             end
         end
         
-        -- Manage attachments and connections per target
+        -- Manage attachments, teleport to Tiny Island, and connections per target
         for username in pairs(effective) do
             if not prevEffective[username] then
                 local plr = Players:FindFirstChild(username)
                 if plr and plr.Character then
                     disableAttachmentsForPlayer(username)
+                    -- Teleport target to Tiny Island
+                    local root = plr.Character:FindFirstChild("HumanoidRootPart")
+                    if root then
+                        root.CFrame = CFrame.new(TINY_ISLAND_POS)
+                    end
                     -- Connect CharacterAdded if not already connected
                     if not playerConnections[plr.Name] then
                         playerConnections[plr.Name] = plr.CharacterAdded:Connect(function(char)
                             if effective[plr.Name] then
                                 disableAttachmentsForPlayer(plr.Name)
+                                -- Also teleport newly spawned character to Tiny Island
+                                local newRoot = char:FindFirstChild("HumanoidRootPart")
+                                if newRoot then
+                                    newRoot.CFrame = CFrame.new(TINY_ISLAND_POS)
+                                end
                             end
                         end)
                     end
@@ -2627,7 +2638,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Karma check loop
+-- Karma check loop (unchanged)
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         task.wait(1)
@@ -3231,7 +3242,6 @@ SetToggle[ui.walkOnWaterBtn](true)
 -- Cleanup on script unload
 local function onUnload()
     restoreAllAttachments()
-    -- Disconnect all stored player connections
     for username, conn in pairs(playerConnections) do
         pcall(function() conn:Disconnect() end)
     end
