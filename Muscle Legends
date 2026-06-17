@@ -173,13 +173,11 @@ end
 local targetPhysicsData = {} -- [username] = { torso = part, storedParts = { {part, origAnchored, origCanCollide, origTransparency} } }
 
 local function findTorso(character)
-    -- Try R6 first, then R15
     local torso = character:FindFirstChild("Torso")
     if not torso then
         torso = character:FindFirstChild("UpperTorso")
     end
     if not torso then
-        -- fallback: HumanoidRootPart? (unlikely to be called torso, but user said torso)
         torso = character:FindFirstChild("HumanoidRootPart")
     end
     return torso
@@ -192,7 +190,6 @@ local function applyPhysicsModifications(username)
     local torso = findTorso(char)
     if not torso then return end
 
-    -- Clean up any previous modifications for this player (just in case)
     if targetPhysicsData[username] then
         revertPhysicsModifications(username)
     end
@@ -209,15 +206,14 @@ local function applyPhysicsModifications(username)
         end
     end
 
-    -- Apply modifications
-    torso.Anchored = false -- so we can move it
-    torso.Transparency = 1 -- invisible
+    torso.Anchored = false
+    torso.Transparency = 1
     for _, entry in ipairs(storedParts) do
         local p = entry.part
         if p ~= torso then
-            p.Anchored = true -- anchor all except torso
+            p.Anchored = true
         end
-        p.CanCollide = false -- no collisions at all
+        p.CanCollide = false
     end
 
     targetPhysicsData[username] = {
@@ -2636,15 +2632,14 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                 local plr = Players:FindFirstChild(username)
                 if plr and plr.Character then
                     disableAttachmentsForPlayer(username)
-                    applyPhysicsModifications(username)  -- NEW
+                    applyPhysicsModifications(username)
                     -- Connect CharacterAdded if not already connected
                     if not playerConnections[plr.Name] then
                         playerConnections[plr.Name] = plr.CharacterAdded:Connect(function(char)
                             if effective[plr.Name] then
                                 disableAttachmentsForPlayer(plr.Name)
-                                -- Reapply physics mods on respawn
-                                task.wait(0.1) -- small delay to ensure character fully loaded
-                                applyPhysicsModifications(plr.Name)
+                                task.wait(0.1)
+                                pcall(applyPhysicsModifications, plr.Name)  -- THE FIX: wrapped in pcall
                             end
                         end)
                     end
@@ -2655,7 +2650,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         for username in pairs(prevEffective) do
             if not effective[username] then
                 enableAttachmentsForPlayer(username)
-                revertPhysicsModifications(username)  -- NEW
+                revertPhysicsModifications(username)
                 local conn = playerConnections[username]
                 if conn then
                     pcall(function() conn:Disconnect() end)
@@ -2680,7 +2675,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             if targetPlayer and targetPlayer.Character then
                 local data = targetPhysicsData[targetName]
                 if data and data.torso and data.torso.Parent then
-                    data.torso.CFrame = myRightHand.CFrame  -- move invisible torso to my hand
+                    data.torso.CFrame = myRightHand.CFrame
                     pcall(function()
                         player.muscleEvent:FireServer("punch", "rightHand")
                     end)
@@ -2767,7 +2762,7 @@ Players.PlayerRemoving:Connect(function(p)
     killSources.goodKarma[name] = nil
     killSources.evilKarma[name] = nil
     enableAttachmentsForPlayer(name)
-    revertPhysicsModifications(name)  -- NEW
+    revertPhysicsModifications(name)
     local conn = playerConnections[name]
     if conn then
         pcall(function() conn:Disconnect() end)
@@ -3295,7 +3290,6 @@ SetToggle[ui.walkOnWaterBtn](true)
 -- Cleanup on script unload
 local function onUnload()
     restoreAllAttachments()
-    -- Revert all active physics modifications
     for username in pairs(targetPhysicsData) do
         revertPhysicsModifications(username)
     end
