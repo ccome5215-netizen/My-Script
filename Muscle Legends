@@ -1,5 +1,5 @@
--- Muscle Legends Hub (with Killer tab + Attachment Management)
--- Original script with Killer tab re‑implemented, calculator secured, and attachment disabling added.
+-- Muscle Legends Hub (with Killer tab + Attachment Management + register fix)
+-- All UI elements stored in a single 'ui' table to avoid local register overflow.
 
 getgenv().ML_Expert_UI = nil
 getgenv().ML_Expert_Loops = nil
@@ -87,9 +87,13 @@ local lastStatValues = {}
 local statGains = {}
 local statGainTimes = {}
 
-local toggleButtons = {}
-local dropdownSetters = {}
-local dropdownHeaderSetters = {}
+-- UI elements stored in one table to save local registers
+local ui = {
+    toggleButtons = {},
+    dropdownSetters = {},
+    dropdownHeaderSetters = {},
+    -- individual UI elements will be added here
+}
 
 -- ==================== KILLER STATE ====================
 local killerState = {
@@ -195,7 +199,7 @@ local rockData = {
     ["Jungle Rock"]      = {req = 10000000,name = "Ancient Jungle Rock", idx = 1, glitchValue = 16.25}
 }
 
--- Gym data
+-- Gym data (unchanged, too long to repeat, but it's in the original script)
 local gymData = {
     ["Tiny Island"] = {
         ["Bench Press"] = {pos = Vector3.new(67.105286, 6.714245, 1984.269043), cost = 10},
@@ -806,7 +810,7 @@ local function createToggle(parent, text, key, callback)
     btn.TextColor3 = Color3.new(1, 1, 1)
     local state = false
     
-    if key then toggleButtons[key] = btn end
+    if key then ui.toggleButtons[key] = btn end
     
     SetToggle[btn] = function(newState)
         state = newState
@@ -955,18 +959,16 @@ local function createDropdown(parent, text, options, multi, callback, checkState
     }
 end
 
-local lockPosBtn, autoRebirthTargetBtn, autoRebirthInfBtn, trackToggle
-
 -- ==================== TAB 1: AUTO FARM ====================
 local f1 = frames["Auto Farm"]
 
-local selectRockDD = createDropdown(f1, "Select Rock", {"Tiny Rock", "Punching Rock", "Large Rock", "Golden Rock", "Frozen Rock", "Mystic Rock", "Inferno Rock", "Legend Rock", "Muscle King Rock", "Jungle Rock"}, false, function(v) 
+ui.selectRockDD = createDropdown(f1, "Select Rock", {"Tiny Rock", "Punching Rock", "Large Rock", "Golden Rock", "Frozen Rock", "Mystic Rock", "Inferno Rock", "Legend Rock", "Muscle King Rock", "Jungle Rock"}, false, function(v) 
     if states.autoGlitch then handleGlitchCleanup(states.selectedMethod, function() states.selectedRock = v end) else states.selectedRock = v end
 end)
-dropdownSetters["selectRock"] = selectRockDD
-dropdownHeaderSetters["selectRock"] = selectRockDD
+ui.dropdownSetters["selectRock"] = ui.selectRockDD
+ui.dropdownHeaderSetters["selectRock"] = ui.selectRockDD
 
-local selectMethodDD = createDropdown(f1, "Select Method", {"Teleport", "NonTeleport"}, false, function(v) 
+ui.selectMethodDD = createDropdown(f1, "Select Method", {"Teleport", "NonTeleport"}, false, function(v) 
     if states.autoGlitch and states.selectedMethod ~= v then
         handleGlitchCleanup(states.selectedMethod, function()
             states.selectedMethod = v
@@ -978,14 +980,14 @@ local selectMethodDD = createDropdown(f1, "Select Method", {"Teleport", "NonTele
         states.selectedMethod = v 
     end
 end)
-dropdownSetters["selectMethod"] = selectMethodDD
-dropdownHeaderSetters["selectMethod"] = selectMethodDD
+ui.dropdownSetters["selectMethod"] = ui.selectMethodDD
+ui.dropdownHeaderSetters["selectMethod"] = ui.selectMethodDD
 
-local toolDD = createDropdown(f1, "Tool Dropdown", {"Weight", "Pushups", "Situps", "Handstands"}, false, function(v) states.selectedTool = v end)
-dropdownSetters["toolDropdown"] = toolDD
-dropdownHeaderSetters["toolDropdown"] = toolDD
+ui.toolDD = createDropdown(f1, "Tool Dropdown", {"Weight", "Pushups", "Situps", "Handstands"}, false, function(v) states.selectedTool = v end)
+ui.dropdownSetters["toolDropdown"] = ui.toolDD
+ui.dropdownHeaderSetters["toolDropdown"] = ui.toolDD
 
-local autoGlitchTrainBtn = createToggle(f1, "Auto Glitch", "autoGlitch", function(val)
+ui.autoGlitchTrainBtn = createToggle(f1, "Auto Glitch", "autoGlitch", function(val)
     if val then
         if not states.selectedRock or not states.selectedMethod then return false end
         local req = rockData[states.selectedRock].req
@@ -1003,7 +1005,7 @@ local autoGlitchTrainBtn = createToggle(f1, "Auto Glitch", "autoGlitch", functio
         states.glitchAccumulated = states.glitchAccumulated + (os.time() - states.glitchStartTime)
         if states.autoGlitchTrain then
             states.autoGlitchTrain = false
-            if toggleButtons["autoGlitchTrain"] then SetToggle[toggleButtons["autoGlitchTrain"]](false) end
+            if ui.toggleButtons["autoGlitchTrain"] then SetToggle[ui.toggleButtons["autoGlitchTrain"]](false) end
         end
         handleGlitchCleanup(states.selectedMethod)
         return false
@@ -1048,21 +1050,21 @@ createToggle(f1, "Auto Glitch While Training", "autoGlitchTrain", function(val)
     return val
 end)
 
-local autoLiftNoAnimBtn = createToggle(f1, "Auto Lift (Without Anim)", "autoLiftNoAnim", function(val)
+ui.autoLiftNoAnimBtn = createToggle(f1, "Auto Lift (Without Anim)", "autoLiftNoAnim", function(val)
     states.autoLiftNoAnim = val
-    if val and toggleButtons["autoLiftValue"] then
+    if val and ui.toggleButtons["autoLiftValue"] then
         states.autoLiftValue = false
         if player:FindFirstChild("autoLiftEnabled") then player.autoLiftEnabled.Value = false end
-        SetToggle[toggleButtons["autoLiftValue"]](false)
+        SetToggle[ui.toggleButtons["autoLiftValue"]](false)
     end
 end)
 
-local autoLiftBtn = createToggle(f1, "Auto Lift", "autoLiftValue", function(val)
+ui.autoLiftBtn = createToggle(f1, "Auto Lift", "autoLiftValue", function(val)
     states.autoLiftValue = val
     if player:FindFirstChild("autoLiftEnabled") then player.autoLiftEnabled.Value = val end
-    if val and toggleButtons["autoLiftNoAnim"] then
+    if val and ui.toggleButtons["autoLiftNoAnim"] then
         states.autoLiftNoAnim = false
-        SetToggle[toggleButtons["autoLiftNoAnim"]](false)
+        SetToggle[ui.toggleButtons["autoLiftNoAnim"]](false)
     end
 end)
 
@@ -1085,7 +1087,7 @@ do
         btn.TextColor3 = Color3.new(1, 1, 1)
         local state = false
         
-        if key then toggleButtons[key] = btn end
+        if key then ui.toggleButtons[key] = btn end
 
         local function updateVisual()
             btn.Text = text .. (state and " [ON]" or " [OFF]")
@@ -1110,7 +1112,7 @@ do
                         states[stateKey] = true
                         if states[otherStateKey] then
                             states[otherStateKey] = false
-                            if otherKey and toggleButtons[otherKey] then SetToggle[toggleButtons[otherKey]](false) end
+                            if otherKey and ui.toggleButtons[otherKey] then SetToggle[ui.toggleButtons[otherKey]](false) end
                         end
                     end
                 end)
@@ -1120,8 +1122,8 @@ do
         return btn
     end
 
-    autoRebirthTargetBtn = createRebirthConfirmToggle(f1, "Auto Rebirth Target", "autoRebirthTarget", "autoRebirthTarget", "autoRebirthInf", "autoRebirthInf")
-    autoRebirthInfBtn = createRebirthConfirmToggle(f1, "Auto Rebirth Inf", "autoRebirthInf", "autoRebirthInf", "autoRebirthTarget", "autoRebirthTarget")
+    ui.autoRebirthTargetBtn = createRebirthConfirmToggle(f1, "Auto Rebirth Target", "autoRebirthTarget", "autoRebirthTarget", "autoRebirthInf", "autoRebirthInf")
+    ui.autoRebirthInfBtn = createRebirthConfirmToggle(f1, "Auto Rebirth Inf", "autoRebirthInf", "autoRebirthInf", "autoRebirthTarget", "autoRebirthTarget")
 end
 
 createToggle(f1, "Auto Muscle King", "autoMuscleKing", function(val)
@@ -1136,7 +1138,7 @@ createToggle(f1, "Auto Muscle King", "autoMuscleKing", function(val)
     end
     if val then
         states.lockedPos = nil
-        if lockPosBtn and SetToggle[lockPosBtn] then SetToggle[lockPosBtn](false) end
+        if ui.lockPosBtn and SetToggle[ui.lockPosBtn] then SetToggle[ui.lockPosBtn](false) end
     end
     return val
 end)
@@ -1218,7 +1220,7 @@ snackBtn.MouseButton1Click:Connect(function()
     end)
 end)
 
-lockPosBtn = createToggle(f2, "Lock Position", "lockPosition", function(val)
+ui.lockPosBtn = createToggle(f2, "Lock Position", "lockPosition", function(val)
     if states.autoMuscleKing and val then return false end
     if val then
         if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
@@ -1239,7 +1241,7 @@ lockPosBtn = createToggle(f2, "Lock Position", "lockPosition", function(val)
 end)
 
 local walkOnWaterPlatform = nil
-local walkOnWaterBtn = createToggle(f2, "Walk on Water", "walkOnWater", function(val)
+ui.walkOnWaterBtn = createToggle(f2, "Walk on Water", "walkOnWater", function(val)
     states.walkOnWater = val
     if not val and walkOnWaterPlatform then
         walkOnWaterPlatform:Destroy()
@@ -1377,7 +1379,7 @@ local function resetStatsUI()
     statGains = {}
     statGainTimes = {}
     if statsPlayerDD then statsPlayerDD.setHeaderText("Player Dropdown v") end
-    if trackToggle then SetToggle[trackToggle](false) end
+    if ui.trackToggle then SetToggle[ui.trackToggle](false) end
     clearPetAuraUI()
 end
 
@@ -1390,7 +1392,7 @@ statsPlayerDD = createDropdown(f3, "Player Dropdown", {}, false, function(label)
         statGainTimes = {}
         statsPlayerDD.setHeaderText(label .. " v")
         states.trackStats = false
-        if trackToggle then SetToggle[trackToggle](false) end
+        if ui.trackToggle then SetToggle[ui.trackToggle](false) end
         clearPetAuraUI()
         
         local tp = Players:FindFirstChild(newTarget)
@@ -1414,7 +1416,7 @@ end)
 
 Players.PlayerRemoving:Connect(function(plr) if states.statsTarget == plr.Name then resetStatsUI() end end)
 
-trackToggle = createToggle(f3, "Track Stats", "trackStats", function(v)
+ui.trackToggle = createToggle(f3, "Track Stats", "trackStats", function(v)
     states.trackStats = v
     if v and not states.statsTarget then return false end
     return v
@@ -1492,16 +1494,16 @@ mapDD = createDropdown(f4, "Select Map", {"Tiny Island", "Beach", "Legend Beach"
     gymDD.refresh(gymOptions)
     gymDD.setHeaderText("Select Gym v")
 end)
-dropdownSetters["selectMap"] = mapDD
-dropdownHeaderSetters["selectMap"] = mapDD
+ui.dropdownSetters["selectMap"] = mapDD
+ui.dropdownHeaderSetters["selectMap"] = mapDD
 
 gymDD = createDropdown(f4, "Select Gym", {"Select map first"}, false, function(gymName)
     if not states.selectedMap or gymName == "Select map first" or gymName == "No gyms available" then return end
     local realName = gymName:gsub(" %(.*%)", "")
     states.selectedGym = realName
 end)
-dropdownSetters["selectGym"] = gymDD
-dropdownHeaderSetters["selectGym"] = gymDD
+ui.dropdownSetters["selectGym"] = gymDD
+ui.dropdownHeaderSetters["selectGym"] = gymDD
 
 local gymBtn = Instance.new("TextButton", f4)
 gymBtn.Size = UDim2.new(1, -10, 0, 35)
@@ -1537,7 +1539,7 @@ gymBtn.MouseButton1Click:Connect(function()
     end)
 end)
 
-local autoGymBtn = createToggle(f4, "Auto Gym", "autoGym", function(val)
+ui.autoGymBtn = createToggle(f4, "Auto Gym", "autoGym", function(val)
     if val then
         if not states.selectedMap or not states.selectedGym then return false end
         startAutoGym()
@@ -1559,7 +1561,7 @@ for _, name in ipairs(treadmillOrder) do
     end
 end
 
-local treadmillDD = createDropdown(f5, "Select Treadmill", treadmillOptions, false, function(display)
+ui.treadmillDD = createDropdown(f5, "Select Treadmill", treadmillOptions, false, function(display)
     local realName = display:match("^(.-) %(")
     if realName and treadmillData[realName] then
         states.selectedTreadmill = realName
@@ -1568,7 +1570,7 @@ local treadmillDD = createDropdown(f5, "Select Treadmill", treadmillOptions, fal
     end
 end)
 
-local autoTreadmillBtn = createToggle(f5, "Auto Treadmill", "autoTreadmill", function(val)
+ui.autoTreadmillBtn = createToggle(f5, "Auto Treadmill", "autoTreadmill", function(val)
     if val then
         if not states.selectedTreadmill then return false end
         startAutoTreadmill()
@@ -1802,7 +1804,7 @@ end
 local selectedGlitchRock = nil
 local expGivesResult = nil
 
-local glitchRockDD = createDropdown(f7, "Rock Dropdown", glitchRockOptions, false, function(v)
+ui.glitchRockDD = createDropdown(f7, "Rock Dropdown", glitchRockOptions, false, function(v)
     local rockName = v:match("^(.-) %(")
     if rockName and rockData[rockName] then
         selectedGlitchRock = rockName
@@ -2154,7 +2156,7 @@ for name, _ in pairs(savedConfigs) do
 end
 if #configNames == 0 then table.insert(configNames, "No saved configs") end
 
-local configDropdown = createDropdown(f10, "Saved Config", configNames, false, function(name)
+ui.configDropdown = createDropdown(f10, "Saved Config", configNames, false, function(name)
     if name ~= "No saved configs" then
         selectedConfigName = name
     end
@@ -2168,7 +2170,7 @@ nameTextBox.TextColor3 = Color3.new(1, 1, 1)
 nameTextBox.Text = ""
 
 local function stopAllAutomations()
-    for key, btn in pairs(toggleButtons) do
+    for key, btn in pairs(ui.toggleButtons) do
         if SetToggle[btn] then
             SetToggle[btn](false)
         end
@@ -2238,8 +2240,8 @@ saveBtn.MouseButton1Click:Connect(function()
     local newNames = {}
     for n, _ in pairs(savedConfigs) do table.insert(newNames, n) end
     if #newNames == 0 then table.insert(newNames, "No saved configs") end
-    configDropdown.refresh(newNames)
-    configDropdown.setHeaderText("Saved Config v")
+    ui.configDropdown.refresh(newNames)
+    ui.configDropdown.setHeaderText("Saved Config v")
 end)
 
 createToggle(f10, "Stop Everything", "stopEverything", function(val)
@@ -2313,7 +2315,7 @@ loadBtn.MouseButton1Click:Connect(function()
         }
         
         for stateKey, toggleKey in pairs(toggleStateMap) do
-            local btn = toggleButtons[toggleKey]
+            local btn = ui.toggleButtons[toggleKey]
             if btn and SetToggle[btn] then
                 local val = s[stateKey]
                 if val ~= nil then
@@ -2322,19 +2324,19 @@ loadBtn.MouseButton1Click:Connect(function()
             end
         end
         
-        if s.selectedRock and dropdownSetters["selectRock"] then
-            dropdownSetters["selectRock"].setValue(s.selectedRock)
+        if s.selectedRock and ui.dropdownSetters["selectRock"] then
+            ui.dropdownSetters["selectRock"].setValue(s.selectedRock)
         end
-        if s.selectedMethod and dropdownSetters["selectMethod"] then
-            dropdownSetters["selectMethod"].setValue(s.selectedMethod)
+        if s.selectedMethod and ui.dropdownSetters["selectMethod"] then
+            ui.dropdownSetters["selectMethod"].setValue(s.selectedMethod)
         end
-        if s.selectedTool and dropdownSetters["toolDropdown"] then
-            dropdownSetters["toolDropdown"].setValue(s.selectedTool)
+        if s.selectedTool and ui.dropdownSetters["toolDropdown"] then
+            ui.dropdownSetters["toolDropdown"].setValue(s.selectedTool)
         end
-        if s.selectedMap and dropdownSetters["selectMap"] then
-            dropdownSetters["selectMap"].setValue(s.selectedMap)
+        if s.selectedMap and ui.dropdownSetters["selectMap"] then
+            ui.dropdownSetters["selectMap"].setValue(s.selectedMap)
         end
-        if s.selectedGym and dropdownSetters["selectGym"] and s.selectedMap then
+        if s.selectedGym and ui.dropdownSetters["selectGym"] and s.selectedMap then
             local mapData = gymData[s.selectedMap]
             if mapData then
                 local gymDisplayName = s.selectedGym
@@ -2346,12 +2348,12 @@ loadBtn.MouseButton1Click:Connect(function()
                         break
                     end
                 end
-                dropdownSetters["selectGym"].setValue(gymDisplayName)
+                ui.dropdownSetters["selectGym"].setValue(gymDisplayName)
             end
         end
-        if s.selectedTreadmill and treadmillData[s.selectedTreadmill] then
+        if s.selectedTreadmill and ui.treadmillDD then
             local display = s.selectedTreadmill .. " (+" .. treadmillData[s.selectedTreadmill].exp .. " EXP)"
-            treadmillDD.setValue(display)
+            ui.treadmillDD.setValue(display)
         end
         
         if s.lockPosition and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
@@ -2383,20 +2385,15 @@ removeConfigBtn.MouseButton1Click:Connect(function()
             local newNames = {}
             for n, _ in pairs(savedConfigs) do table.insert(newNames, n) end
             if #newNames == 0 then table.insert(newNames, "No saved configs") end
-            configDropdown.refresh(newNames)
+            ui.configDropdown.refresh(newNames)
             selectedConfigName = nil
-            configDropdown.setHeaderText("Saved Config v")
+            ui.configDropdown.setHeaderText("Saved Config v")
         end
     end)
 end)
 
 -- ==================== TAB 12: KILLER ====================
 local f_killer = frames["Killer"]
-
--- Player Dropdown (multi‑select)
-local killerPlayerDD
--- Whitelist Dropdown (multi‑select)
-local killerWhitelistDD
 
 -- Helper to refresh both dropdowns
 local function refreshKillerDropdowns()
@@ -2407,18 +2404,16 @@ local function refreshKillerDropdowns()
             table.insert(playerOptions, getPlayerDisplayString(p))
         end
     end
-    if killerPlayerDD then
-        killerPlayerDD.refresh(playerOptions)
-        -- keep header text if we have selected players
-        -- We'll just rely on the checkStateFunc to show selection.
+    if ui.killerPlayerDD then
+        ui.killerPlayerDD.refresh(playerOptions)
     end
-    if killerWhitelistDD then
-        killerWhitelistDD.refresh(playerOptions)
+    if ui.killerWhitelistDD then
+        ui.killerWhitelistDD.refresh(playerOptions)
     end
 end
 
 -- Player Dropdown (multi‑select)
-killerPlayerDD = createDropdown(f_killer, "Player Dropdown", {}, true, function(display)
+ui.killerPlayerDD = createDropdown(f_killer, "Player Dropdown", {}, true, function(display)
     local username = getUsernameFromDisplay(display)
     if not username then return false end
     if killerState.selectedPlayers[username] then
@@ -2441,7 +2436,7 @@ end, function(display)
 end)
 
 -- Whitelist Dropdown (multi‑select)
-killerWhitelistDD = createDropdown(f_killer, "Whitelist Dropdown", {}, true, function(display)
+ui.killerWhitelistDD = createDropdown(f_killer, "Whitelist Dropdown", {}, true, function(display)
     local username = getUsernameFromDisplay(display)
     if not username then return false end
     -- If auto‑whitelisted, do nothing
@@ -2451,11 +2446,7 @@ killerWhitelistDD = createDropdown(f_killer, "Whitelist Dropdown", {}, true, fun
     if isWhitelisted(username) then
         -- Unselect (manual)
         killerState.manualWhitelist[username] = nil
-        -- Remove from whitelist set if not auto
         if not killerState.autoWhitelist[username] then
-            -- if it was in whitelist, remove it (but we already track via manual/auto)
-            -- Actually we need to maintain a combined set. We'll just update the sources.
-            -- For kill everyone, we need to update targets.
             if killerState.killEveryoneEnabled then
                 killSources.everyone[username] = nil
             end
@@ -2464,7 +2455,7 @@ killerWhitelistDD = createDropdown(f_killer, "Whitelist Dropdown", {}, true, fun
     else
         killerState.manualWhitelist[username] = true
         if killerState.killEveryoneEnabled then
-            killSources.everyone[username] = nil -- remove from everyone if active
+            killSources.everyone[username] = nil
         end
         return true
     end
@@ -2474,16 +2465,14 @@ end, function(display)
 end)
 
 -- Whitelist Friends toggle
-local whitelistFriendsToggle = createToggle(f_killer, "Whitelist Friends", "whitelistFriends", function(val)
+ui.whitelistFriendsToggle = createToggle(f_killer, "Whitelist Friends", "whitelistFriends", function(val)
     killerState.whitelistFriendsEnabled = val
-    -- If turned on, whitelist all friends
     if val then
         for _, p in ipairs(Players:GetPlayers()) do
             if p ~= player then
                 pcall(function()
                     if Players:IsFriendsWith(p.UserId) then
                         killerState.autoWhitelist[p.Name] = true
-                        -- remove from everyone if active
                         if killerState.killEveryoneEnabled then
                             killSources.everyone[p.Name] = nil
                         end
@@ -2492,27 +2481,17 @@ local whitelistFriendsToggle = createToggle(f_killer, "Whitelist Friends", "whit
             end
         end
     else
-        -- Remove all auto‑whitelisted friends
         for name in pairs(killerState.autoWhitelist) do
             killerState.autoWhitelist[name] = nil
-            -- If not manually whitelisted, ensure they are not whitelisted
             if not killerState.manualWhitelist[name] then
-                -- they are removed from whitelist implicitly
-                -- If kill everyone is on, they become targets again
                 if killerState.killEveryoneEnabled then
-                    -- but we need to add them if they are not whitelisted
-                    -- We'll update in the kill everyone loop or on toggle.
+                    -- will be re-added in the loop
                 end
             end
         end
-        -- Also clear autoWhitelist table
-        -- We'll just clear it properly.
     end
-    -- Refresh whitelist dropdown to reflect changes
     refreshKillerDropdowns()
-    -- Update kill everyone targets after change
     if killerState.killEveryoneEnabled then
-        -- Rebuild everyone source
         killSources.everyone = {}
         for _, p in ipairs(Players:GetPlayers()) do
             if p ~= player and not isWhitelisted(p.Name) then
@@ -2524,7 +2503,7 @@ local whitelistFriendsToggle = createToggle(f_killer, "Whitelist Friends", "whit
 end)
 
 -- Kill toggle
-local killToggle = createToggle(f_killer, "Kill", "killSelected", function(val)
+ui.killToggle = createToggle(f_killer, "Kill", "killSelected", function(val)
     killerState.killSelectedEnabled = val
     if val then
         for name in pairs(killerState.selectedPlayers) do
@@ -2539,10 +2518,9 @@ local killToggle = createToggle(f_killer, "Kill", "killSelected", function(val)
 end)
 
 -- Kill Everyone toggle
-local killEveryoneToggle = createToggle(f_killer, "Kill Everyone", "killEveryone", function(val)
+ui.killEveryoneToggle = createToggle(f_killer, "Kill Everyone", "killEveryone", function(val)
     killerState.killEveryoneEnabled = val
     if val then
-        -- Target all non‑whitelisted
         for _, p in ipairs(Players:GetPlayers()) do
             if p ~= player and not isWhitelisted(p.Name) then
                 killSources.everyone[p.Name] = true
@@ -2557,7 +2535,7 @@ local killEveryoneToggle = createToggle(f_killer, "Kill Everyone", "killEveryone
 end)
 
 -- Auto Good Karma toggle
-local autoGoodKarmaToggle = createToggle(f_killer, "Auto Good Karma", "autoGoodKarma", function(val)
+ui.autoGoodKarmaToggle = createToggle(f_killer, "Auto Good Karma", "autoGoodKarma", function(val)
     killerState.autoGoodKarmaEnabled = val
     if not val then
         for name in pairs(killSources.goodKarma) do
@@ -2568,7 +2546,7 @@ local autoGoodKarmaToggle = createToggle(f_killer, "Auto Good Karma", "autoGoodK
 end)
 
 -- Auto Evil Karma toggle
-local autoEvilKarmaToggle = createToggle(f_killer, "Auto Evil Karma", "autoEvilKarma", function(val)
+ui.autoEvilKarmaToggle = createToggle(f_killer, "Auto Evil Karma", "autoEvilKarma", function(val)
     killerState.autoEvilKarmaEnabled = val
     if not val then
         for name in pairs(killSources.evilKarma) do
@@ -2579,7 +2557,7 @@ local autoEvilKarmaToggle = createToggle(f_killer, "Auto Evil Karma", "autoEvilK
 end)
 
 -- ==================== KILLER LOOPS (with Attachment Management) ====================
-local prevEffective = {} -- track previous targets for attachment enable/disable
+local prevEffective = {}
 
 -- Main kill loop (runs every 0.05s)
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
@@ -2590,16 +2568,8 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         -- Check if we have Punch equipped
         local punchTool = getPunch()
         local hasPunch = punchTool and punchTool.Parent == player.Character
-        if not hasPunch then
-            -- Skip kill actions, but we still need to manage attachments?
-            -- If we don't have Punch, we shouldn't teleport, but attachments should remain disabled?
-            -- According to behavior: "stop fire right hand remote unless i was hold" – so if not holding Punch, we don't teleport.
-            -- But attachments should remain disabled as long as the player is still targeted.
-            -- So we still need to track effective targets for attachment management.
-            -- We'll compute effective and manage attachments, but skip teleport.
-        end
         
-        -- Combine all sources into effective set (regardless of Punch)
+        -- Combine all sources into effective set
         local effective = {}
         for srcName, srcSet in pairs(killSources) do
             for name, _ in pairs(srcSet) do
@@ -2607,21 +2577,17 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             end
         end
         
-        -- --- Manage attachments per target ---
-        -- For players newly targeted: disable attachments
+        -- Manage attachments per target
         for username in pairs(effective) do
             if not prevEffective[username] then
-                -- New target: disable attachments
                 local plr = Players:FindFirstChild(username)
                 if plr and plr.Character then
                     disableAttachmentsForPlayer(username)
-                    -- Watch for character respawns for this player
                     if not plr.CharacterAdded:IsConnected(plr._attachmentManagerConnection) then
                         if plr._attachmentManagerConnection then
                             plr._attachmentManagerConnection:Disconnect()
                         end
                         plr._attachmentManagerConnection = plr.CharacterAdded:Connect(function(char)
-                            -- Re-disable attachments if still targeted
                             if effective[plr.Name] then
                                 disableAttachmentsForPlayer(plr.Name)
                             end
@@ -2631,11 +2597,9 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             end
         end
         
-        -- For players no longer targeted: re-enable attachments
         for username in pairs(prevEffective) do
             if not effective[username] then
                 enableAttachmentsForPlayer(username)
-                -- Clean up CharacterAdded connection
                 local plr = Players:FindFirstChild(username)
                 if plr and plr._attachmentManagerConnection then
                     pcall(function() plr._attachmentManagerConnection:Disconnect() end)
@@ -2644,7 +2608,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             end
         end
         
-        -- Update prevEffective for next iteration
         prevEffective = {}
         for name in pairs(effective) do prevEffective[name] = true end
         
@@ -2653,7 +2616,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             continue
         end
         
-        -- For each target, teleport their RightHand to our RightHand and fire remote
         local myChar = player.Character
         if not myChar then continue end
         local myRightHand = myChar:FindFirstChild("RightHand") or myChar:FindFirstChild("Right Arm")
@@ -2665,9 +2627,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                 local targetChar = targetPlayer.Character
                 local targetRightHand = targetChar:FindFirstChild("RightHand") or targetChar:FindFirstChild("Right Arm")
                 if targetRightHand and targetRightHand:IsA("BasePart") then
-                    -- Teleport target's RightHand to our RightHand position
                     targetRightHand.CFrame = myRightHand.CFrame
-                    -- Fire remote
                     pcall(function()
                         player.muscleEvent:FireServer("punch", "rightHand")
                     end)
@@ -2683,7 +2643,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         task.wait(1)
         if states.stopEverything then continue end
         
-        -- Auto Good Karma
         if killerState.autoGoodKarmaEnabled then
             for _, p in ipairs(Players:GetPlayers()) do
                 if p ~= player then
@@ -2704,7 +2663,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             end
         end
         
-        -- Auto Evil Karma
         if killerState.autoEvilKarmaEnabled then
             for _, p in ipairs(Players:GetPlayers()) do
                 if p ~= player then
@@ -2731,7 +2689,6 @@ end))
 Players.PlayerAdded:Connect(function(p)
     if p == player then return end
     refreshKillerDropdowns()
-    -- Whitelist Friends: if enabled, auto‑whitelist friends
     if killerState.whitelistFriendsEnabled then
         pcall(function()
             if Players:IsFriendsWith(p.UserId) then
@@ -2742,17 +2699,13 @@ Players.PlayerAdded:Connect(function(p)
             end
         end)
     end
-    -- Kill Everyone: if enabled, target new player if not whitelisted
     if killerState.killEveryoneEnabled and not isWhitelisted(p.Name) then
         killSources.everyone[p.Name] = true
     end
-    -- Setup attachment manager for this player if they join
-    -- (CharacterAdded connection handled in kill loop)
 end)
 
 Players.PlayerRemoving:Connect(function(p)
     local name = p.Name
-    -- Clean up all references
     killerState.selectedPlayers[name] = nil
     killerState.manualWhitelist[name] = nil
     killerState.autoWhitelist[name] = nil
@@ -2760,7 +2713,6 @@ Players.PlayerRemoving:Connect(function(p)
     killSources.everyone[name] = nil
     killSources.goodKarma[name] = nil
     killSources.evilKarma[name] = nil
-    -- Restore attachments if any
     enableAttachmentsForPlayer(name)
     if p._attachmentManagerConnection then
         pcall(function() p._attachmentManagerConnection:Disconnect() end)
@@ -2769,7 +2721,6 @@ Players.PlayerRemoving:Connect(function(p)
     refreshKillerDropdowns()
 end)
 
--- Initial refresh
 refreshKillerDropdowns()
 
 -- ==================== MAIN LOOPS ====================
@@ -3142,7 +3093,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         if states.autoRebirthInf then ReplicatedStorage.rEvents.rebirthRemote:InvokeServer("rebirthRequest") end
         if states.autoRebirthTarget then local target = tonumber(Config.RebirthTarget) or 0;
             if player.leaderstats.Rebirths.Value < target then ReplicatedStorage.rEvents.rebirthRemote:InvokeServer("rebirthRequest") else states.autoRebirthTarget = false;
-            if toggleButtons["autoRebirthTarget"] then SetToggle[toggleButtons["autoRebirthTarget"]](false) end end end
+            if ui.toggleButtons["autoRebirthTarget"] then SetToggle[ui.toggleButtons["autoRebirthTarget"]](false) end end end
         if states.viewing and states.statsTarget then local tp = Players:FindFirstChild(states.statsTarget);
             if tp and tp.Character and tp.Character:FindFirstChild("Humanoid") then workspace.CurrentCamera.CameraSubject = tp.Character.Humanoid end elseif not states.viewing and player.Character and player.Character:FindFirstChild("Humanoid") then workspace.CurrentCamera.CameraSubject = player.Character.Humanoid end
         
@@ -3284,13 +3235,11 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
-SetToggle[walkOnWaterBtn](true)
+SetToggle[ui.walkOnWaterBtn](true)
 
 -- Cleanup on script unload
 local function onUnload()
-    -- Restore all attachments first
     restoreAllAttachments()
-    -- Cancel loops
     for _, loop in ipairs(getgenv().ML_Expert_Loops or {}) do pcall(task.cancel, loop) end
     if getgenv().ML_Expert_UI then pcall(function() getgenv().ML_Expert_UI:Destroy() end) end
     if states.flyBody then
@@ -3306,7 +3255,6 @@ local function onUnload()
             rock.Anchored = data.Anchored
         end
     end
-    -- Clear any CharacterAdded connections
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr._attachmentManagerConnection then
             pcall(function() plr._attachmentManagerConnection:Disconnect() end)
