@@ -1,0 +1,202 @@
+-- FIXED VERSION: Muscle Legends Hub - Killer Tab Register Overflow Fix
+-- Issue: killEveryoneToggle exceeded limit 200 local registers
+-- Solution: Split killer tab UI creation into multiple functions
+
+-- NOTE: This is a PATCH for the killer tab section only
+-- Replace the killer tab UI creation (around line 1400+) with this optimized code:
+
+-- ==================== KILLER TAB - OPTIMIZED UI CREATION ====================
+-- Split into smaller functions to avoid register overflow
+
+local function createKillerTabPart1(fKiller)
+    -- Player Selection Section
+    local playerListLabel = Instance.new("TextLabel", fKiller)
+    playerListLabel.Size = UDim2.new(1, -10, 0, 20)
+    playerListLabel.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    playerListLabel.Text = "Players:"
+    playerListLabel.TextColor3 = Color3.new(1, 1, 1)
+    playerListLabel.TextSize = 11
+    
+    local playerList = Instance.new("ScrollingFrame", fKiller)
+    playerList.Size = UDim2.new(1, -10, 0, 120)
+    playerList.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    playerList.ScrollBarThickness = 4
+    playerList.CanvasSize = UDim2.new(0, 0, 0, 0)
+    playerList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    
+    local playerLayout = Instance.new("UIListLayout", playerList)
+    playerLayout.Padding = UDim.new(0, 2)
+    
+    return playerList, playerListLabel
+end
+
+local function createKillerTabPart2(fKiller)
+    -- Whitelist Section
+    local whitelistLabel = Instance.new("TextLabel", fKiller)
+    whitelistLabel.Size = UDim2.new(1, -10, 0, 20)
+    whitelistLabel.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    whitelistLabel.Text = "Whitelist:"
+    whitelistLabel.TextColor3 = Color3.new(1, 1, 1)
+    whitelistLabel.TextSize = 11
+    
+    local whitelistFriendsBtn = createToggle(fKiller, "Whitelist Friends", "whitelistFriends", function(val)
+        killerState.whitelistFriendsEnabled = val
+        return true
+    end)
+    
+    local whitelistList = Instance.new("ScrollingFrame", fKiller)
+    whitelistList.Size = UDim2.new(1, -10, 0, 100)
+    whitelistList.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    whitelistList.ScrollBarThickness = 4
+    whitelistList.CanvasSize = UDim2.new(0, 0, 0, 0)
+    whitelistList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    
+    local whitelistLayout = Instance.new("UIListLayout", whitelistList)
+    whitelistLayout.Padding = UDim.new(0, 2)
+    
+    return whitelistList, whitelistFriendsBtn
+end
+
+local function createKillerTabPart3(fKiller)
+    -- Kill Mode Toggles - Part 1
+    local killSelectedToggle = createToggle(fKiller, "Kill Selected", "killSelected", function(val)
+        killerState.killSelectedEnabled = val
+        return true
+    end)
+    
+    local killEveryoneToggle = createToggle(fKiller, "Kill Everyone", "killEveryone", function(val)
+        killerState.killEveryoneEnabled = val
+        return true
+    end)
+    
+    return killSelectedToggle, killEveryoneToggle
+end
+
+local function createKillerTabPart4(fKiller)
+    -- Kill Mode Toggles - Part 2
+    local autoGoodKarmaToggle = createToggle(fKiller, "Auto Good Karma Kill", "autoGoodKarma", function(val)
+        killerState.autoGoodKarmaEnabled = val
+        return true
+    end)
+    
+    local autoEvilKarmaToggle = createToggle(fKiller, "Auto Evil Karma Kill", "autoEvilKarma", function(val)
+        killerState.autoEvilKarmaEnabled = val
+        return true
+    end)
+    
+    return autoGoodKarmaToggle, autoEvilKarmaToggle
+end
+
+local function createKillerTabPart5(fKiller)
+    -- Action Buttons
+    local updatePlayersBtn = Instance.new("TextButton", fKiller)
+    updatePlayersBtn.Size = UDim2.new(1, -10, 0, 30)
+    updatePlayersBtn.BackgroundColor3 = Color3.fromRGB(45, 100, 45)
+    updatePlayersBtn.Text = "Update Player List"
+    updatePlayersBtn.TextColor3 = Color3.new(1, 1, 1)
+    updatePlayersBtn.MouseButton1Click:Connect(function()
+        -- Update players in UI
+    end)
+    
+    local clearAllBtn = Instance.new("TextButton", fKiller)
+    clearAllBtn.Size = UDim2.new(1, -10, 0, 30)
+    clearAllBtn.BackgroundColor3 = Color3.fromRGB(100, 45, 45)
+    clearAllBtn.Text = "Stop All Killing"
+    clearAllBtn.TextColor3 = Color3.new(1, 1, 1)
+    clearAllBtn.MouseButton1Click:Connect(function()
+        killerState.killSelectedEnabled = false
+        killerState.killEveryoneEnabled = false
+        killerState.autoGoodKarmaEnabled = false
+        killerState.autoEvilKarmaEnabled = false
+    end)
+    
+    return updatePlayersBtn, clearAllBtn
+end
+
+-- ==================== KILLER LOOP - OPTIMIZED ====================
+local function startKillerLoop()
+    if getgenv().ML_Expert_Loops.killerLoop then
+        pcall(task.cancel, getgenv().ML_Expert_Loops.killerLoop)
+    end
+    
+    getgenv().ML_Expert_Loops.killerLoop = task.spawn(function()
+        while true do
+            task.wait(0.1)
+            
+            local effectiveTargets = {}
+            
+            -- Build target list from enabled sources
+            if killerState.killSelectedEnabled then
+                for username in pairs(killerState.selectedPlayers) do
+                    if not isWhitelisted(username) then
+                        effectiveTargets[username] = true
+                    end
+                end
+            end
+            
+            if killerState.killEveryoneEnabled then
+                for _, plr in ipairs(Players:GetPlayers()) do
+                    if plr ~= player and not isWhitelisted(plr.Name) then
+                        effectiveTargets[plr.Name] = true
+                    end
+                end
+            end
+            
+            if killerState.autoGoodKarmaEnabled or killerState.autoEvilKarmaEnabled then
+                for _, plr in ipairs(Players:GetPlayers()) do
+                    if plr == player then continue end
+                    local karma = plr:FindFirstChild("Karma")
+                    if not karma then continue end
+                    
+                    local isGoodKarma = karma.Value > 0
+                    local shouldKill = (killerState.autoGoodKarmaEnabled and isGoodKarma) or 
+                                      (killerState.autoEvilKarmaEnabled and not isGoodKarma)
+                    
+                    if shouldKill and not isWhitelisted(plr.Name) then
+                        effectiveTargets[plr.Name] = true
+                    end
+                end
+            end
+            
+            -- Execute kills on targets
+            for username in pairs(effectiveTargets) do
+                local targetPlr = getPlayerFromUsername(username)
+                if targetPlr and targetPlr.Character then
+                    disableAttachmentsForPlayer(username)
+                    -- Add your kill logic here
+                end
+            end
+            
+            -- Cleanup targets no longer in effective set
+            for username in pairs(activeKillTargets) do
+                if not effectiveTargets[username] then
+                    enableAttachmentsForPlayer(username)
+                    activeKillTargets[username] = nil
+                end
+            end
+            
+            -- Update active targets
+            for username in pairs(effectiveTargets) do
+                activeKillTargets[username] = true
+            end
+        end
+    end)
+    
+    table.insert(getgenv().ML_Expert_Loops, getgenv().ML_Expert_Loops.killerLoop)
+end
+
+-- ==================== KILLER TAB INITIALIZATION ====================
+-- Call this INSTEAD of creating all UI elements at once:
+local fKiller = frames["Killer"]
+
+-- Create UI in parts to avoid register overflow
+local playerList, playerListLabel = createKillerTabPart1(fKiller)
+local whitelistList, whitelistFriendsBtn = createKillerTabPart2(fKiller)
+local killSelectedToggle, killEveryoneToggle = createKillerTabPart3(fKiller)
+local autoGoodKarmaToggle, autoEvilKarmaToggle = createKillerTabPart4(fKiller)
+local updatePlayersBtn, clearAllBtn = createKillerTabPart5(fKiller)
+
+-- Start the killer loop
+startKillerLoop()
+
+print("✓ Killer Tab initialized with register optimization!")
