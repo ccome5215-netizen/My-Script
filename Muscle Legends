@@ -121,6 +121,9 @@ local activeKillTargets = {} -- [username] = true (we just track to restore late
 -- ==================== ATTACHMENT MANAGEMENT ====================
 local targetAttachmentData = {} -- [username] = { stored = { {Instance, OriginalParent}, ... }, disabled = false }
 
+-- NEW: Store CharacterAdded connections externally, not on Player objects
+local playerConnections = {}    -- [username] = RBXScriptConnection
+
 local function disableAttachmentsForPlayer(username)
     local plr = Players:FindFirstChild(username)
     if not plr then return end
@@ -172,15 +175,11 @@ local function restoreAllAttachments()
     targetAttachmentData = {}
 end
 
--- Handle character respawn while targeted
+-- Handle character respawn while targeted (now uses playerConnections table)
 local function onCharacterAdded(username, char)
     if not username then return end
-    -- If this player is currently targeted, re-disable attachments
-    -- We need to know if they are in the current effective set; we'll check in the kill loop.
-    -- But we can mark that we need to re-disable next loop.
-    -- We'll store a flag in targetAttachmentData for pending re-disable.
+    -- If this player is currently targeted, re-disable attachments on next loop
     if targetAttachmentData[username] then
-        -- Mark that we need to re-disable on next loop
         targetAttachmentData[username].needReDisable = true
     end
 end
@@ -199,7 +198,7 @@ local rockData = {
     ["Jungle Rock"]      = {req = 10000000,name = "Ancient Jungle Rock", idx = 1, glitchValue = 16.25}
 }
 
--- Gym data (unchanged, too long to repeat, but it's in the original script)
+-- Gym data (unchanged)
 local gymData = {
     ["Tiny Island"] = {
         ["Bench Press"] = {pos = Vector3.new(67.105286, 6.714245, 1984.269043), cost = 10},
@@ -638,10 +637,9 @@ local function getPlayerDisplayString(p)
 end
 
 local function getUsernameFromDisplay(display)
-    -- If display contains " (", extract username inside parentheses
     local startParen = display:find(" %(")
     if startParen then
-        local inside = display:sub(startParen + 2, -2) -- remove " (" and ")"
+        local inside = display:sub(startParen + 2, -2)
         return inside
     else
         return display
@@ -1943,7 +1941,6 @@ calcResultLabel.TextColor3 = Color3.new(1, 1, 1)
 calcResultLabel.Font = Enum.Font.GothamBold
 calcResultLabel.TextSize = 16
 
--- Safe evaluation: only allow digits, operators, parentheses, spaces, decimal points
 local function isSafeExpression(expr)
     return expr:match("^[%d%+%-%*%/%(%)%. ]+$") ~= nil
 end
@@ -2556,20 +2553,18 @@ ui.autoEvilKarmaToggle = createToggle(f_killer, "Auto Evil Karma", "autoEvilKarm
     return val
 end)
 
--- ==================== KILLER LOOPS (with Attachment Management) ====================
+-- ==================== KILLER LOOPS (with Attachment Management fixed) ====================
 local prevEffective = {}
 
--- Main kill loop (runs every 0.05s)
+-- Main kill loop
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         task.wait(0.05)
         if states.stopEverything then continue end
         
-        -- Check if we have Punch equipped
         local punchTool = getPunch()
         local hasPunch = punchTool and punchTool.Parent == player.Character
         
-        -- Combine all sources into effective set
         local effective = {}
         for srcName, srcSet in pairs(killSources) do
             for name, _ in pairs(srcSet) do
@@ -2577,17 +2572,15 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             end
         end
         
-        -- Manage attachments per target
+        -- Manage attachments and connections per target
         for username in pairs(effective) do
             if not prevEffective[username] then
                 local plr = Players:FindFirstChild(username)
                 if plr and plr.Character then
                     disableAttachmentsForPlayer(username)
-                    if not plr.CharacterAdded:IsConnected(plr._attachmentManagerConnection) then
-                        if plr._attachmentManagerConnection then
-                            plr._attachmentManagerConnection:Disconnect()
-                        end
-                        plr._attachmentManagerConnection = plr.CharacterAdded:Connect(function(char)
+                    -- Connect CharacterAdded if not already connected
+                    if not playerConnections[plr.Name] then
+                        playerConnections[plr.Name] = plr.CharacterAdded:Connect(function(char)
                             if effective[plr.Name] then
                                 disableAttachmentsForPlayer(plr.Name)
                             end
@@ -2600,10 +2593,10 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         for username in pairs(prevEffective) do
             if not effective[username] then
                 enableAttachmentsForPlayer(username)
-                local plr = Players:FindFirstChild(username)
-                if plr and plr._attachmentManagerConnection then
-                    pcall(function() plr._attachmentManagerConnection:Disconnect() end)
-                    plr._attachmentManagerConnection = nil
+                local conn = playerConnections[username]
+                if conn then
+                    pcall(function() conn:Disconnect() end)
+                    playerConnections[username] = nil
                 end
             end
         end
@@ -2611,17 +2604,14 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         prevEffective = {}
         for name in pairs(effective) do prevEffective[name] = true end
         
-        -- If we don't have Punch, skip teleport and remote firing
-        if not hasPunch then
-            continue
-        end
+        if not hasPunch then continue end
         
         local myChar = player.Character
         if not myChar then continue end
         local myRightHand = myChar:FindFirstChild("RightHand") or myChar:FindFirstChild("Right Arm")
         if not myRightHand then continue end
         
-        for targetName, _ in pairs(effective) do
+        for targetName in pairs(effective) do
             local targetPlayer = Players:FindFirstChild(targetName)
             if targetPlayer and targetPlayer.Character then
                 local targetChar = targetPlayer.Character
@@ -2637,7 +2627,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- Karma check loop (runs every 1 second)
+-- Karma check loop
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         task.wait(1)
@@ -2714,9 +2704,10 @@ Players.PlayerRemoving:Connect(function(p)
     killSources.goodKarma[name] = nil
     killSources.evilKarma[name] = nil
     enableAttachmentsForPlayer(name)
-    if p._attachmentManagerConnection then
-        pcall(function() p._attachmentManagerConnection:Disconnect() end)
-        p._attachmentManagerConnection = nil
+    local conn = playerConnections[name]
+    if conn then
+        pcall(function() conn:Disconnect() end)
+        playerConnections[name] = nil
     end
     refreshKillerDropdowns()
 end)
@@ -3240,6 +3231,11 @@ SetToggle[ui.walkOnWaterBtn](true)
 -- Cleanup on script unload
 local function onUnload()
     restoreAllAttachments()
+    -- Disconnect all stored player connections
+    for username, conn in pairs(playerConnections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    playerConnections = {}
     for _, loop in ipairs(getgenv().ML_Expert_Loops or {}) do pcall(task.cancel, loop) end
     if getgenv().ML_Expert_UI then pcall(function() getgenv().ML_Expert_UI:Destroy() end) end
     if states.flyBody then
@@ -3253,12 +3249,6 @@ local function onUnload()
             rock.CanCollide = data.CanCollide
             rock.CFrame = data.CFrame
             rock.Anchored = data.Anchored
-        end
-    end
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr._attachmentManagerConnection then
-            pcall(function() plr._attachmentManagerConnection:Disconnect() end)
-            plr._attachmentManagerConnection = nil
         end
     end
 end
