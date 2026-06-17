@@ -114,13 +114,8 @@ local killSources = {
     evilKarma = {},   -- [username] = true
 }
 
--- Track players currently being teleported (for cleanup)
-local activeKillTargets = {} -- [username] = true (we just track to restore later if needed)
-
 -- ==================== ATTACHMENT MANAGEMENT ====================
 local targetAttachmentData = {} -- [username] = { stored = { {Instance, OriginalParent}, ... }, disabled = false }
-
--- Store CharacterAdded connections externally, not on Player objects
 local playerConnections = {}    -- [username] = RBXScriptConnection
 
 local function disableAttachmentsForPlayer(username)
@@ -129,7 +124,7 @@ local function disableAttachmentsForPlayer(username)
     local char = plr.Character
     if not char then return end
     if targetAttachmentData[username] and targetAttachmentData[username].disabled then
-        return -- already disabled
+        return
     end
     
     local stored = {}
@@ -174,12 +169,77 @@ local function restoreAllAttachments()
     targetAttachmentData = {}
 end
 
--- Handle character respawn while targeted (now uses playerConnections table)
-local function onCharacterAdded(username, char)
-    if not username then return end
-    if targetAttachmentData[username] then
-        targetAttachmentData[username].needReDisable = true
+-- ==================== PHYSICS MODIFICATION (Torso teleport, anchors, collisions) ====================
+local targetPhysicsData = {} -- [username] = { torso = part, storedParts = { {part, origAnchored, origCanCollide, origTransparency} } }
+
+local function findTorso(character)
+    -- Try R6 first, then R15
+    local torso = character:FindFirstChild("Torso")
+    if not torso then
+        torso = character:FindFirstChild("UpperTorso")
     end
+    if not torso then
+        -- fallback: HumanoidRootPart? (unlikely to be called torso, but user said torso)
+        torso = character:FindFirstChild("HumanoidRootPart")
+    end
+    return torso
+end
+
+local function applyPhysicsModifications(username)
+    local plr = Players:FindFirstChild(username)
+    if not plr or not plr.Character then return end
+    local char = plr.Character
+    local torso = findTorso(char)
+    if not torso then return end
+
+    -- Clean up any previous modifications for this player (just in case)
+    if targetPhysicsData[username] then
+        revertPhysicsModifications(username)
+    end
+
+    local storedParts = {}
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") then
+            table.insert(storedParts, {
+                part = part,
+                origAnchored = part.Anchored,
+                origCanCollide = part.CanCollide,
+                origTransparency = part.Transparency
+            })
+        end
+    end
+
+    -- Apply modifications
+    torso.Anchored = false -- so we can move it
+    torso.Transparency = 1 -- invisible
+    for _, entry in ipairs(storedParts) do
+        local p = entry.part
+        if p ~= torso then
+            p.Anchored = true -- anchor all except torso
+        end
+        p.CanCollide = false -- no collisions at all
+    end
+
+    targetPhysicsData[username] = {
+        torso = torso,
+        storedParts = storedParts
+    }
+end
+
+local function revertPhysicsModifications(username)
+    local data = targetPhysicsData[username]
+    if not data then return end
+    for _, entry in ipairs(data.storedParts) do
+        local p = entry.part
+        if p and p.Parent then
+            pcall(function()
+                p.Anchored = entry.origAnchored
+                p.CanCollide = entry.origCanCollide
+                p.Transparency = entry.origTransparency
+            end)
+        end
+    end
+    targetPhysicsData[username] = nil
 end
 
 -- ==================== ROCK DATA ====================
@@ -1983,12 +2043,9 @@ end)
 -- ==================== TAB 9: TELEPORT ====================
 local f9 = frames["Teleport"]
 
--- Tiny Island position used later for killer teleports
-local TINY_ISLAND_POS = Vector3.new(-33.693745, 7.456870, 1892.807007)
-
 local teleportList = {
     {name = "Safe Spot", pos = Vector3.new(218.565002, 41.153748, -8129.369629)},
-    {name = "Tiny Island", pos = TINY_ISLAND_POS},
+    {name = "Tiny Island", pos = Vector3.new(-33.693745, 7.456870, 1892.807007)},
     {name = "Beach", pos = Vector3.new(4.466469, 7.303733, 132.878891)},
     {name = "Frozen Island", pos = Vector3.new(-2623.022217, 7.303728, -409.073334)},
     {name = "Mystic Island", pos = Vector3.new(2250.778076, 7.303732, 1073.226685)},
@@ -2554,7 +2611,7 @@ ui.autoEvilKarmaToggle = createToggle(f_killer, "Auto Evil Karma", "autoEvilKarm
     return val
 end)
 
--- ==================== KILLER LOOPS (with Attachment Management + Tiny Island Teleport) ====================
+-- ==================== KILLER LOOPS (NEW: Torso teleport + anchored/invisible + no collision) ====================
 local prevEffective = {}
 
 -- Main kill loop
@@ -2573,27 +2630,21 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             end
         end
         
-        -- Manage attachments, teleport to Tiny Island, and connections per target
+        -- Manage attachments, physics modifications, and connections per target
         for username in pairs(effective) do
             if not prevEffective[username] then
                 local plr = Players:FindFirstChild(username)
                 if plr and plr.Character then
                     disableAttachmentsForPlayer(username)
-                    -- Teleport target to Tiny Island
-                    local root = plr.Character:FindFirstChild("HumanoidRootPart")
-                    if root then
-                        root.CFrame = CFrame.new(TINY_ISLAND_POS)
-                    end
+                    applyPhysicsModifications(username)  -- NEW
                     -- Connect CharacterAdded if not already connected
                     if not playerConnections[plr.Name] then
                         playerConnections[plr.Name] = plr.CharacterAdded:Connect(function(char)
                             if effective[plr.Name] then
                                 disableAttachmentsForPlayer(plr.Name)
-                                -- Also teleport newly spawned character to Tiny Island
-                                local newRoot = char:FindFirstChild("HumanoidRootPart")
-                                if newRoot then
-                                    newRoot.CFrame = CFrame.new(TINY_ISLAND_POS)
-                                end
+                                -- Reapply physics mods on respawn
+                                task.wait(0.1) -- small delay to ensure character fully loaded
+                                applyPhysicsModifications(plr.Name)
                             end
                         end)
                     end
@@ -2604,6 +2655,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         for username in pairs(prevEffective) do
             if not effective[username] then
                 enableAttachmentsForPlayer(username)
+                revertPhysicsModifications(username)  -- NEW
                 local conn = playerConnections[username]
                 if conn then
                     pcall(function() conn:Disconnect() end)
@@ -2622,13 +2674,13 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         local myRightHand = myChar:FindFirstChild("RightHand") or myChar:FindFirstChild("Right Arm")
         if not myRightHand then continue end
         
+        -- Teleport torso of each effective target to my right hand and fire punch
         for targetName in pairs(effective) do
             local targetPlayer = Players:FindFirstChild(targetName)
             if targetPlayer and targetPlayer.Character then
-                local targetChar = targetPlayer.Character
-                local targetRightHand = targetChar:FindFirstChild("RightHand") or targetChar:FindFirstChild("Right Arm")
-                if targetRightHand and targetRightHand:IsA("BasePart") then
-                    targetRightHand.CFrame = myRightHand.CFrame
+                local data = targetPhysicsData[targetName]
+                if data and data.torso and data.torso.Parent then
+                    data.torso.CFrame = myRightHand.CFrame  -- move invisible torso to my hand
                     pcall(function()
                         player.muscleEvent:FireServer("punch", "rightHand")
                     end)
@@ -2715,6 +2767,7 @@ Players.PlayerRemoving:Connect(function(p)
     killSources.goodKarma[name] = nil
     killSources.evilKarma[name] = nil
     enableAttachmentsForPlayer(name)
+    revertPhysicsModifications(name)  -- NEW
     local conn = playerConnections[name]
     if conn then
         pcall(function() conn:Disconnect() end)
@@ -3242,6 +3295,10 @@ SetToggle[ui.walkOnWaterBtn](true)
 -- Cleanup on script unload
 local function onUnload()
     restoreAllAttachments()
+    -- Revert all active physics modifications
+    for username in pairs(targetPhysicsData) do
+        revertPhysicsModifications(username)
+    end
     for username, conn in pairs(playerConnections) do
         pcall(function() conn:Disconnect() end)
     end
