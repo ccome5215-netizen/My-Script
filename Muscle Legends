@@ -1,4 +1,4 @@
--- Muscle Legends Hub (with Killer tab + Attachment Management + register fix)
+-- Muscle Legends Hub (with Killer tab + Attachment Management removed)
 -- All UI elements stored in a single 'ui' table to avoid local register overflow.
 
 getgenv().ML_Expert_UI = nil
@@ -113,130 +113,6 @@ local killSources = {
     goodKarma = {},   -- [username] = true
     evilKarma = {},   -- [username] = true
 }
-
--- ==================== ATTACHMENT MANAGEMENT ====================
-local targetAttachmentData = {} -- [username] = { stored = { {Instance, OriginalParent}, ... }, disabled = false }
-local playerConnections = {}    -- [username] = RBXScriptConnection
-
-local function disableAttachmentsForPlayer(username)
-    local plr = Players:FindFirstChild(username)
-    if not plr then return end
-    local char = plr.Character
-    if not char then return end
-    if targetAttachmentData[username] and targetAttachmentData[username].disabled then
-        return
-    end
-    
-    local stored = {}
-    for _, desc in ipairs(char:GetDescendants()) do
-        if desc:IsA("Attachment") then
-            table.insert(stored, { Instance = desc, OriginalParent = desc.Parent })
-            desc.Parent = nil
-        end
-    end
-    
-    targetAttachmentData[username] = {
-        stored = stored,
-        disabled = true
-    }
-end
-
-local function enableAttachmentsForPlayer(username)
-    local data = targetAttachmentData[username]
-    if not data or not data.disabled then return end
-    for _, entry in ipairs(data.stored) do
-        if entry.Instance and entry.OriginalParent then
-            pcall(function()
-                entry.Instance.Parent = entry.OriginalParent
-            end)
-        end
-    end
-    targetAttachmentData[username] = nil
-end
-
-local function restoreAllAttachments()
-    for username, data in pairs(targetAttachmentData) do
-        if data.disabled then
-            for _, entry in ipairs(data.stored) do
-                if entry.Instance and entry.OriginalParent then
-                    pcall(function()
-                        entry.Instance.Parent = entry.OriginalParent
-                    end)
-                end
-            end
-        end
-    end
-    targetAttachmentData = {}
-end
-
--- ==================== PHYSICS MODIFICATION (Torso teleport, anchors, collisions) ====================
-local targetPhysicsData = {} -- [username] = { torso = part, storedParts = { {part, origAnchored, origCanCollide, origTransparency} } }
-
-local function findTorso(character)
-    local torso = character:FindFirstChild("Torso")
-    if not torso then
-        torso = character:FindFirstChild("UpperTorso")
-    end
-    if not torso then
-        torso = character:FindFirstChild("HumanoidRootPart")
-    end
-    return torso
-end
-
-local function applyPhysicsModifications(username)
-    local plr = Players:FindFirstChild(username)
-    if not plr or not plr.Character then return end
-    local char = plr.Character
-    local torso = findTorso(char)
-    if not torso then return end
-
-    if targetPhysicsData[username] then
-        revertPhysicsModifications(username)
-    end
-
-    local storedParts = {}
-    for _, part in ipairs(char:GetDescendants()) do
-        if part:IsA("BasePart") then
-            table.insert(storedParts, {
-                part = part,
-                origAnchored = part.Anchored,
-                origCanCollide = part.CanCollide,
-                origTransparency = part.Transparency
-            })
-        end
-    end
-
-    torso.Anchored = false
-    torso.Transparency = 1
-    for _, entry in ipairs(storedParts) do
-        local p = entry.part
-        if p ~= torso then
-            p.Anchored = true
-        end
-        p.CanCollide = false
-    end
-
-    targetPhysicsData[username] = {
-        torso = torso,
-        storedParts = storedParts
-    }
-end
-
-local function revertPhysicsModifications(username)
-    local data = targetPhysicsData[username]
-    if not data then return end
-    for _, entry in ipairs(data.storedParts) do
-        local p = entry.part
-        if p and p.Parent then
-            pcall(function()
-                p.Anchored = entry.origAnchored
-                p.CanCollide = entry.origCanCollide
-                p.Transparency = entry.origTransparency
-            end)
-        end
-    end
-    targetPhysicsData[username] = nil
-end
 
 -- ==================== ROCK DATA ====================
 local rockData = {
@@ -2607,8 +2483,12 @@ ui.autoEvilKarmaToggle = createToggle(f_killer, "Auto Evil Karma", "autoEvilKarm
     return val
 end)
 
--- ==================== KILLER LOOPS (FIXED: auto-repair missing physics after death) ====================
-local prevEffective = {}
+-- ==================== KILLER LOOPS (Torso teleport only, no attachments/physics) ====================
+
+-- Helper to find torso (R6/R15)
+local function findTorso(character)
+    return character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso") or character:FindFirstChild("HumanoidRootPart")
+end
 
 -- Main kill loop
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
@@ -2619,59 +2499,13 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         local punchTool = getPunch()
         local hasPunch = punchTool and punchTool.Parent == player.Character
         
+        -- Build effective target set from all active sources
         local effective = {}
         for srcName, srcSet in pairs(killSources) do
             for name, _ in pairs(srcSet) do
                 effective[name] = true
             end
         end
-        
-        -- Manage attachments, physics modifications, and connections per target
-        for username in pairs(effective) do
-            if not prevEffective[username] then
-                -- Newly effective target
-                local plr = Players:FindFirstChild(username)
-                if plr and plr.Character then
-                    disableAttachmentsForPlayer(username)
-                    applyPhysicsModifications(username)
-                    if not playerConnections[plr.Name] then
-                        playerConnections[plr.Name] = plr.CharacterAdded:Connect(function(char)
-                            if effective[plr.Name] then
-                                disableAttachmentsForPlayer(plr.Name)
-                                task.wait(0.1)
-                                pcall(applyPhysicsModifications, plr.Name)
-                            end
-                        end)
-                    end
-                end
-            else
-                -- Already effective, but check if physics data is missing/stale (e.g. after death)
-                local plr = Players:FindFirstChild(username)
-                if plr and plr.Character then
-                    local data = targetPhysicsData[username]
-                    if not data or not data.torso or not data.torso.Parent then
-                        -- Repair: reapply modifications
-                        disableAttachmentsForPlayer(username)
-                        applyPhysicsModifications(username)
-                    end
-                end
-            end
-        end
-        
-        for username in pairs(prevEffective) do
-            if not effective[username] then
-                enableAttachmentsForPlayer(username)
-                revertPhysicsModifications(username)
-                local conn = playerConnections[username]
-                if conn then
-                    pcall(function() conn:Disconnect() end)
-                    playerConnections[username] = nil
-                end
-            end
-        end
-        
-        prevEffective = {}
-        for name in pairs(effective) do prevEffective[name] = true end
         
         if not hasPunch then continue end
         
@@ -2684,9 +2518,9 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         for targetName in pairs(effective) do
             local targetPlayer = Players:FindFirstChild(targetName)
             if targetPlayer and targetPlayer.Character then
-                local data = targetPhysicsData[targetName]
-                if data and data.torso and data.torso.Parent then
-                    data.torso.CFrame = myRightHand.CFrame
+                local torso = findTorso(targetPlayer.Character)
+                if torso then
+                    torso.CFrame = myRightHand.CFrame
                     pcall(function()
                         player.muscleEvent:FireServer("punch", "rightHand")
                     end)
@@ -2772,13 +2606,6 @@ Players.PlayerRemoving:Connect(function(p)
     killSources.everyone[name] = nil
     killSources.goodKarma[name] = nil
     killSources.evilKarma[name] = nil
-    enableAttachmentsForPlayer(name)
-    revertPhysicsModifications(name)
-    local conn = playerConnections[name]
-    if conn then
-        pcall(function() conn:Disconnect() end)
-        playerConnections[name] = nil
-    end
     refreshKillerDropdowns()
 end)
 
@@ -3298,16 +3125,8 @@ end))
 
 SetToggle[ui.walkOnWaterBtn](true)
 
--- Cleanup on script unload
+-- Cleanup on script unload (no attachments/physics to revert)
 local function onUnload()
-    restoreAllAttachments()
-    for username in pairs(targetPhysicsData) do
-        revertPhysicsModifications(username)
-    end
-    for username, conn in pairs(playerConnections) do
-        pcall(function() conn:Disconnect() end)
-    end
-    playerConnections = {}
     for _, loop in ipairs(getgenv().ML_Expert_Loops or {}) do pcall(task.cancel, loop) end
     if getgenv().ML_Expert_UI then pcall(function() getgenv().ML_Expert_UI:Destroy() end) end
     if states.flyBody then
