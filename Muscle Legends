@@ -2607,7 +2607,7 @@ ui.autoEvilKarmaToggle = createToggle(f_killer, "Auto Evil Karma", "autoEvilKarm
     return val
 end)
 
--- ==================== KILLER LOOPS (NEW: Torso teleport + anchored/invisible + no collision) ====================
+-- ==================== KILLER LOOPS (FIXED: auto-repair missing physics after death) ====================
 local prevEffective = {}
 
 -- Main kill loop
@@ -2629,19 +2629,30 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         -- Manage attachments, physics modifications, and connections per target
         for username in pairs(effective) do
             if not prevEffective[username] then
+                -- Newly effective target
                 local plr = Players:FindFirstChild(username)
                 if plr and plr.Character then
                     disableAttachmentsForPlayer(username)
                     applyPhysicsModifications(username)
-                    -- Connect CharacterAdded if not already connected
                     if not playerConnections[plr.Name] then
                         playerConnections[plr.Name] = plr.CharacterAdded:Connect(function(char)
                             if effective[plr.Name] then
                                 disableAttachmentsForPlayer(plr.Name)
                                 task.wait(0.1)
-                                pcall(applyPhysicsModifications, plr.Name)  -- THE FIX: wrapped in pcall
+                                pcall(applyPhysicsModifications, plr.Name)
                             end
                         end)
+                    end
+                end
+            else
+                -- Already effective, but check if physics data is missing/stale (e.g. after death)
+                local plr = Players:FindFirstChild(username)
+                if plr and plr.Character then
+                    local data = targetPhysicsData[username]
+                    if not data or not data.torso or not data.torso.Parent then
+                        -- Repair: reapply modifications
+                        disableAttachmentsForPlayer(username)
+                        applyPhysicsModifications(username)
                     end
                 end
             end
