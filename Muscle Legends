@@ -1,4 +1,4 @@
--- Muscle Legends Hub (with Killer tab + Attachment Management removed)
+-- Muscle Legends Hub (with Killer tab + Attachment Management integrated)
 -- All UI elements stored in a single 'ui' table to avoid local register overflow.
 
 getgenv().ML_Expert_UI = nil
@@ -113,6 +113,9 @@ local killSources = {
     goodKarma = {},   -- [username] = true
     evilKarma = {},   -- [username] = true
 }
+
+-- NEW: Track disabled attachments for re‑enabling
+local disabledAttachments = {}  -- [username] = { Motor6D/Weld/WeldConstraint, ... }
 
 -- ==================== ROCK DATA ====================
 local rockData = {
@@ -584,6 +587,11 @@ local function isWhitelisted(username)
     return killerState.manualWhitelist[username] or killerState.autoWhitelist[username]
 end
 
+-- NEW: Helper to find the torso (R6/R15)
+local function findTorso(character)
+    return character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso") or character:FindFirstChild("HumanoidRootPart")
+end
+
 -- ==================== UI FRAMEWORK ====================
 local ScreenGui = Instance.new("ScreenGui", player.PlayerGui)
 ScreenGui.Name = "MuscleLegendsHub"
@@ -911,7 +919,8 @@ end)
 ui.dropdownSetters["selectMethod"] = ui.selectMethodDD
 ui.dropdownHeaderSetters["selectMethod"] = ui.selectMethodDD
 
-ui.toolDD = createDropdown(f1, "Tool Dropdown", {"Weight", "Pushups", "Situps", "Handstands"}, false, function(v) states.selectedTool = v end)
+-- NEW: Added "Punch" to tool dropdown
+ui.toolDD = createDropdown(f1, "Tool Dropdown", {"Weight", "Pushups", "Situps", "Handstands", "Punch"}, false, function(v) states.selectedTool = v end)
 ui.dropdownSetters["toolDropdown"] = ui.toolDD
 ui.dropdownHeaderSetters["toolDropdown"] = ui.toolDD
 
@@ -1372,11 +1381,32 @@ petDetails = Instance.new("TextLabel", f3); petDetails.Size = UDim2.new(1, -10, 
 petDetails.TextColor3 = Color3.new(1, 1, 1); petDetails.TextXAlignment = Enum.TextXAlignment.Left; petDetails.TextYAlignment = Enum.TextYAlignment.Top
 petDetails.Text = "Select a Pet to view stats"
 
-basicDD = createDropdown(f3, "Basic Pets", {"Nothing Here"}, false, function(l) states.currentPetLabel = l; handleItemSelection(l, petRefsBasic, petDetails) end)
-advDD = createDropdown(f3, "Advance Pets", {"Nothing Here"}, false, function(l) states.currentPetLabel = l; handleItemSelection(l, petRefsAdv, petDetails) end)
-rareDD = createDropdown(f3, "Rare Pets", {"Nothing Here"}, false, function(l) states.currentPetLabel = l; handleItemSelection(l, petRefsRare, petDetails) end)
-epicDD = createDropdown(f3, "Epic Pets", {"Nothing Here"}, false, function(l) states.currentPetLabel = l; handleItemSelection(l, petRefsEpic, petDetails) end)
-uniqueDD = createDropdown(f3, "Unique Pets", {"Nothing Here"}, false, function(l) states.currentPetLabel = l; handleItemSelection(l, petRefsUnique, petDetails) end)
+-- NEW: Added proper state tables assignment
+basicDD = createDropdown(f3, "Basic Pets", {"Nothing Here"}, false, function(l)
+    states.currentPetLabel = l
+    states.currentPetTable = "Basic"
+    handleItemSelection(l, petRefsBasic, petDetails)
+end)
+advDD = createDropdown(f3, "Advance Pets", {"Nothing Here"}, false, function(l)
+    states.currentPetLabel = l
+    states.currentPetTable = "Advanced"
+    handleItemSelection(l, petRefsAdv, petDetails)
+end)
+rareDD = createDropdown(f3, "Rare Pets", {"Nothing Here"}, false, function(l)
+    states.currentPetLabel = l
+    states.currentPetTable = "Rare"
+    handleItemSelection(l, petRefsRare, petDetails)
+end)
+epicDD = createDropdown(f3, "Epic Pets", {"Nothing Here"}, false, function(l)
+    states.currentPetLabel = l
+    states.currentPetTable = "Epic"
+    handleItemSelection(l, petRefsEpic, petDetails)
+end)
+uniqueDD = createDropdown(f3, "Unique Pets", {"Nothing Here"}, false, function(l)
+    states.currentPetLabel = l
+    states.currentPetTable = "Unique"
+    handleItemSelection(l, petRefsUnique, petDetails)
+end)
 
 local auraHeader = Instance.new("TextLabel", f3); auraHeader.Size = UDim2.new(1, -10, 0, 25); auraHeader.Text = "--- AURAS ---"; auraHeader.BackgroundTransparency = 1
 auraHeader.TextColor3 = Color3.fromRGB(200, 0, 200); auraHeader.Font = Enum.Font.SourceSansBold; auraHeader.TextSize = 18
@@ -1385,11 +1415,32 @@ auraDetails = Instance.new("TextLabel", f3); auraDetails.Size = UDim2.new(1, -10
 auraDetails.BackgroundTransparency = 1; auraDetails.TextColor3 = Color3.new(1, 1, 1); auraDetails.TextXAlignment = Enum.TextXAlignment.Left; auraDetails.TextYAlignment = Enum.TextYAlignment.Top
 auraDetails.Text = "Select an Aura to view stats"
 
-auraBasicDD = createDropdown(f3, "Basic Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; handleItemSelection(l, auraRefsBasic, auraDetails) end)
-auraAdvDD = createDropdown(f3, "Advance Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; handleItemSelection(l, auraRefsAdv, auraDetails) end)
-auraRareDD = createDropdown(f3, "Rare Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; handleItemSelection(l, auraRefsRare, auraDetails) end)
-auraEpicDD = createDropdown(f3, "Epic Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; handleItemSelection(l, auraRefsEpic, auraDetails) end)
-auraUniqueDD = createDropdown(f3, "Unique Auras", {"Nothing Here"}, false, function(l) states.currentAuraLabel = l; handleItemSelection(l, auraRefsUnique, auraDetails) end)
+-- NEW: Added proper state tables assignment
+auraBasicDD = createDropdown(f3, "Basic Auras", {"Nothing Here"}, false, function(l)
+    states.currentAuraLabel = l
+    states.currentAuraTable = "Basic"
+    handleItemSelection(l, auraRefsBasic, auraDetails)
+end)
+auraAdvDD = createDropdown(f3, "Advance Auras", {"Nothing Here"}, false, function(l)
+    states.currentAuraLabel = l
+    states.currentAuraTable = "Advanced"
+    handleItemSelection(l, auraRefsAdv, auraDetails)
+end)
+auraRareDD = createDropdown(f3, "Rare Auras", {"Nothing Here"}, false, function(l)
+    states.currentAuraLabel = l
+    states.currentAuraTable = "Rare"
+    handleItemSelection(l, auraRefsRare, auraDetails)
+end)
+auraEpicDD = createDropdown(f3, "Epic Auras", {"Nothing Here"}, false, function(l)
+    states.currentAuraLabel = l
+    states.currentAuraTable = "Epic"
+    handleItemSelection(l, auraRefsEpic, auraDetails)
+end)
+auraUniqueDD = createDropdown(f3, "Unique Auras", {"Nothing Here"}, false, function(l)
+    states.currentAuraLabel = l
+    states.currentAuraTable = "Unique"
+    handleItemSelection(l, auraRefsUnique, auraDetails)
+end)
 
 local ultHeader = Instance.new("TextLabel", f3); ultHeader.Size = UDim2.new(1, -10, 0, 20); ultHeader.Text = "--- ULTIMATES ---"; ultHeader.BackgroundTransparency = 1; ultHeader.TextColor3 = Color3.fromRGB(0, 200, 200); ultHeader.Font = Enum.Font.SourceSansBold; ultHeader.TextXAlignment = Enum.TextXAlignment.Left
 local ultList = Instance.new("TextLabel", f3); ultList.Size = UDim2.new(1, -10, 0, 250); ultList.BackgroundTransparency = 1; ultList.TextColor3 = Color3.new(1, 1, 1); ultList.TextXAlignment = Enum.TextXAlignment.Left; ultList.TextYAlignment = Enum.TextYAlignment.Top; ultList.Text = "None"; ultList.TextWrapped = true; ultList.AutomaticSize = Enum.AutomaticSize.Y
@@ -2483,14 +2534,11 @@ ui.autoEvilKarmaToggle = createToggle(f_killer, "Auto Evil Karma", "autoEvilKarm
     return val
 end)
 
--- ==================== KILLER LOOPS (Torso teleport only, no attachments/physics) ====================
+-- ==================== KILLER LOOPS (Torso teleport + attachment management) ====================
 
--- Helper to find torso (R6/R15)
-local function findTorso(character)
-    return character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso") or character:FindFirstChild("HumanoidRootPart")
-end
+-- Helper to find torso (R6/R15) – already defined above
 
--- Main kill loop
+-- Main kill loop (teleport + attack) – unchanged, but now we also handle attachment disable in another loop.
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         task.wait(0.05)
@@ -2525,6 +2573,114 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                         player.muscleEvent:FireServer("punch", "rightHand")
                     end)
                 end
+            end
+        end
+    end
+end))
+
+-- NEW: Attachment management loop – disable non‑torso attachments on targeted players when kill is active and punch is held.
+table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
+    while true do
+        task.wait(0.2) -- slower, no need to run every frame
+        if states.stopEverything then continue end
+
+        local anyKillActive = killerState.killSelectedEnabled or killerState.killEveryoneEnabled
+            or killerState.autoGoodKarmaEnabled or killerState.autoEvilKarmaEnabled
+        local punch = getPunch()
+        local hasPunch = punch and punch.Parent == player.Character
+
+        -- If no kill toggles or no punch held, re‑enable all disabled attachments
+        if not anyKillActive or not hasPunch then
+            for _, list in pairs(disabledAttachments) do
+                for _, inst in ipairs(list) do
+                    if inst.Parent then pcall(function() inst.Enabled = true end) end
+                end
+            end
+            table.clear(disabledAttachments)
+            continue
+        end
+
+        -- Build effective target set
+        local targets = {}
+        for srcName, srcSet in pairs(killSources) do
+            for name, _ in pairs(srcSet) do
+                targets[name] = true
+            end
+        end
+
+        -- Process all players
+        for _, otherPlayer in ipairs(Players:GetPlayers()) do
+            if otherPlayer == player then continue end
+            local name = otherPlayer.Name
+            local char = otherPlayer.Character
+
+            if not targets[name] or not char then
+                -- Not a target, re‑enable any previously disabled attachments for this player
+                local list = disabledAttachments[name]
+                if list then
+                    for _, inst in ipairs(list) do
+                        if inst.Parent then pcall(function() inst.Enabled = true end) end
+                    end
+                    disabledAttachments[name] = nil
+                end
+                continue
+            end
+
+            -- Find torso
+            local torso = findTorso(char)
+            if not torso then
+                -- No torso, clear list if any
+                disabledAttachments[name] = nil
+                continue
+            end
+
+            -- Collect all attachments (Motor6D, Weld, WeldConstraint) except those involving the torso
+            local newList = {}
+            for _, desc in ipairs(char:GetDescendants()) do
+                if desc:IsA("Motor6D") or desc:IsA("Weld") or desc:IsA("WeldConstraint") then
+                    local part0, part1 = nil, nil
+                    if desc:IsA("Motor6D") or desc:IsA("Weld") then
+                        part0 = desc.Part0
+                        part1 = desc.Part1
+                    elseif desc:IsA("WeldConstraint") then
+                        part0 = desc.Part0
+                        part1 = desc.Part1
+                    end
+                    -- Skip if either part is the torso
+                    if part0 == torso or part1 == torso then
+                        continue
+                    end
+                    if desc.Enabled ~= false then
+                        desc.Enabled = false
+                    end
+                    table.insert(newList, desc)
+                end
+            end
+
+            -- Re‑enable any previously disabled attachments that are no longer in the character
+            local oldList = disabledAttachments[name]
+            if oldList then
+                for _, inst in ipairs(oldList) do
+                    if not inst.Parent then
+                        -- The instance was removed (player respawned), no action
+                    elseif not table.find(newList, inst) then
+                        -- It exists but wasn't included this time, re‑enable
+                        pcall(function() inst.Enabled = true end)
+                    end
+                end
+            end
+
+            disabledAttachments[name] = newList
+        end
+
+        -- Clean up disabledAttachments for players who left
+        for name, list in pairs(disabledAttachments) do
+            local plr = Players:FindFirstChild(name)
+            if not plr then
+                for _, inst in ipairs(list) do
+                    if inst.Parent then pcall(function() inst.Enabled = true end) end
+                end
+                disabledAttachments[name] = nil
             end
         end
     end
@@ -2606,6 +2762,14 @@ Players.PlayerRemoving:Connect(function(p)
     killSources.everyone[name] = nil
     killSources.goodKarma[name] = nil
     killSources.evilKarma[name] = nil
+    -- NEW: re‑enable any disabled attachments for the leaving player
+    local list = disabledAttachments[name]
+    if list then
+        for _, inst in ipairs(list) do
+            if inst.Parent then pcall(function() inst.Enabled = true end) end
+        end
+        disabledAttachments[name] = nil
+    end
     refreshKillerDropdowns()
 end)
 
@@ -3127,6 +3291,13 @@ SetToggle[ui.walkOnWaterBtn](true)
 
 -- Cleanup on script unload (no attachments/physics to revert)
 local function onUnload()
+    -- NEW: Re‑enable all disabled attachments before destroying
+    for _, list in pairs(disabledAttachments) do
+        for _, inst in ipairs(list) do
+            if inst.Parent then pcall(function() inst.Enabled = true end) end
+        end
+    end
+    table.clear(disabledAttachments)
     for _, loop in ipairs(getgenv().ML_Expert_Loops or {}) do pcall(task.cancel, loop) end
     if getgenv().ML_Expert_UI then pcall(function() getgenv().ML_Expert_UI:Destroy() end) end
     if states.flyBody then
