@@ -82,7 +82,7 @@ local rockCache = {}
 local prevRepSpeed = 5
 local nameMap = {}
 local displayNameMap = {}
-local toggleHand = false
+local toggleHand = false      -- used for auto glitch
 local lastStatValues = {}
 local statGains = {}
 local statGainTimes = {}
@@ -118,6 +118,9 @@ local killSources = {
 local disabledAttachments = {}  -- [username] = { Motor6D/Weld/WeldConstraint, ... }
 -- Track anchored parts for re‑enabling
 local anchoredParts = {}        -- [username] = { BasePart, BasePart, ... }
+
+-- Killer toggle hand (like auto glitch)
+local killerToggleHand = false  -- flips between left/right each target
 
 -- ==================== ROCK DATA ====================
 local rockData = {
@@ -2536,9 +2539,9 @@ ui.autoEvilKarmaToggle = createToggle(f_killer, "Auto Evil Karma", "autoEvilKarm
     return val
 end)
 
--- ==================== KILLER LOOPS (Rapid Left/Right hand teleport & punch) ====================
+-- ==================== KILLER LOOPS (Rapid alternating left/right hand teleport & punch) ====================
 
--- Main kill loop: anchors/disables once, then teleports torso alternately to left and right hand.
+-- Main kill loop: anchor/disable once, then alternate teleport to left and right hand each iteration
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         task.wait(0.05)
@@ -2622,16 +2625,21 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             end
             disabledAttachments[targetName] = newAttachList
 
-            -- Teleport to left hand, punch left
-            torso.CFrame = myLeftHand.CFrame
+            -- Alternate between left and right hand (like auto glitch)
+            local handName, targetHand
+            if killerToggleHand then
+                handName = "leftHand"
+                targetHand = myLeftHand
+            else
+                handName = "rightHand"
+                targetHand = myRightHand
+            end
+            killerToggleHand = not killerToggleHand   -- flip for next target
+
+            -- Teleport to chosen hand and punch
+            torso.CFrame = targetHand.CFrame
             pcall(function()
-                player.muscleEvent:FireServer("punch", "leftHand")
-            end)
-            
-            -- Teleport to right hand, punch right
-            torso.CFrame = myRightHand.CFrame
-            pcall(function()
-                player.muscleEvent:FireServer("punch", "rightHand")
+                player.muscleEvent:FireServer("punch", handName)
             end)
         end
     end
