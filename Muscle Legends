@@ -1,4 +1,4 @@
--- Muscle Legends Hub (with Killer tab + Attachment Management integrated)
+-- Muscle Legends Hub (with Killer tab + Attachment & Anchor Management integrated)
 -- All UI elements stored in a single 'ui' table to avoid local register overflow.
 
 getgenv().ML_Expert_UI = nil
@@ -116,6 +116,8 @@ local killSources = {
 
 -- NEW: Track disabled attachments for re‑enabling
 local disabledAttachments = {}  -- [username] = { Motor6D/Weld/WeldConstraint, ... }
+-- NEW: Track anchored parts for re‑enabling
+local anchoredParts = {}        -- [username] = { BasePart, BasePart, ... }
 
 -- ==================== ROCK DATA ====================
 local rockData = {
@@ -587,7 +589,7 @@ local function isWhitelisted(username)
     return killerState.manualWhitelist[username] or killerState.autoWhitelist[username]
 end
 
--- NEW: Helper to find the torso (R6/R15)
+-- Helper to find the torso (R6/R15)
 local function findTorso(character)
     return character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso") or character:FindFirstChild("HumanoidRootPart")
 end
@@ -2534,11 +2536,9 @@ ui.autoEvilKarmaToggle = createToggle(f_killer, "Auto Evil Karma", "autoEvilKarm
     return val
 end)
 
--- ==================== KILLER LOOPS (Torso teleport + attachment management) ====================
+-- ==================== KILLER LOOPS (Torso teleport + attachment & anchor management) ====================
 
--- Helper to find torso (R6/R15) – already defined above
-
--- Main kill loop (teleport + attack) – unchanged, but now we also handle attachment disable in another loop.
+-- Main kill loop (teleport + attack) – unchanged.
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         task.wait(0.05)
@@ -2578,10 +2578,10 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- NEW: Attachment management loop – disable non‑torso attachments on targeted players when kill is active and punch is held.
+-- NEW: Combined attachment disabling & body anchoring loop.
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
-        task.wait(0.2) -- slower, no need to run every frame
+        task.wait(0.2)
         if states.stopEverything then continue end
 
         local anyKillActive = killerState.killSelectedEnabled or killerState.killEveryoneEnabled
@@ -2589,14 +2589,22 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         local punch = getPunch()
         local hasPunch = punch and punch.Parent == player.Character
 
-        -- If no kill toggles or no punch held, re‑enable all disabled attachments
+        -- If no kill toggles or no punch held, re‑enable everything
         if not anyKillActive or not hasPunch then
+            -- Re‑enable attachments
             for _, list in pairs(disabledAttachments) do
                 for _, inst in ipairs(list) do
                     if inst.Parent then pcall(function() inst.Enabled = true end) end
                 end
             end
             table.clear(disabledAttachments)
+            -- Unanchor parts
+            for _, list in pairs(anchoredParts) do
+                for _, part in ipairs(list) do
+                    if part.Parent then pcall(function() part.Anchored = false end) end
+                end
+            end
+            table.clear(anchoredParts)
             continue
         end
 
@@ -2615,13 +2623,20 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             local char = otherPlayer.Character
 
             if not targets[name] or not char then
-                -- Not a target, re‑enable any previously disabled attachments for this player
-                local list = disabledAttachments[name]
-                if list then
-                    for _, inst in ipairs(list) do
+                -- Not a target, clean up attachments and anchors
+                local attachList = disabledAttachments[name]
+                if attachList then
+                    for _, inst in ipairs(attachList) do
                         if inst.Parent then pcall(function() inst.Enabled = true end) end
                     end
                     disabledAttachments[name] = nil
+                end
+                local anchorList = anchoredParts[name]
+                if anchorList then
+                    for _, part in ipairs(anchorList) do
+                        if part.Parent then pcall(function() part.Anchored = false end) end
+                    end
+                    anchoredParts[name] = nil
                 end
                 continue
             end
@@ -2629,13 +2644,13 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             -- Find torso
             local torso = findTorso(char)
             if not torso then
-                -- No torso, clear list if any
                 disabledAttachments[name] = nil
+                anchoredParts[name] = nil
                 continue
             end
 
-            -- Collect all attachments (Motor6D, Weld, WeldConstraint) except those involving the torso
-            local newList = {}
+            -- ===== ATTACHMENTS: disable non‑torso joints =====
+            local newAttachList = {}
             for _, desc in ipairs(char:GetDescendants()) do
                 if desc:IsA("Motor6D") or desc:IsA("Weld") or desc:IsA("WeldConstraint") then
                     local part0, part1 = nil, nil
@@ -2646,34 +2661,61 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                         part0 = desc.Part0
                         part1 = desc.Part1
                     end
-                    -- Skip if either part is the torso
                     if part0 == torso or part1 == torso then
                         continue
                     end
                     if desc.Enabled ~= false then
                         desc.Enabled = false
                     end
-                    table.insert(newList, desc)
+                    table.insert(newAttachList, desc)
                 end
             end
-
-            -- Re‑enable any previously disabled attachments that are no longer in the character
-            local oldList = disabledAttachments[name]
-            if oldList then
-                for _, inst in ipairs(oldList) do
+            -- Re‑enable old attachments that are gone now
+            local oldAttachList = disabledAttachments[name]
+            if oldAttachList then
+                for _, inst in ipairs(oldAttachList) do
                     if not inst.Parent then
-                        -- The instance was removed (player respawned), no action
-                    elseif not table.find(newList, inst) then
-                        -- It exists but wasn't included this time, re‑enable
+                        -- already removed
+                    elseif not table.find(newAttachList, inst) then
                         pcall(function() inst.Enabled = true end)
                     end
                 end
             end
+            disabledAttachments[name] = newAttachList
 
-            disabledAttachments[name] = newList
+            -- ===== ANCHOR: anchor all BaseParts except torso =====
+            local newAnchorList = {}
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") and part ~= torso then
+                    if part.Name ~= "HumanoidRootPart" then  -- skip if it's the root part if torso==HRP
+                        -- skip parts named Torso, UpperTorso explicitly as well
+                    end
+                    -- Ensure we skip torso parts themselves
+                    if part == torso then continue end
+                    if part.Name == "Torso" or part.Name == "UpperTorso" or part.Name == "HumanoidRootPart" then
+                        continue
+                    end
+                    if not part.Anchored then
+                        part.Anchored = true
+                    end
+                    table.insert(newAnchorList, part)
+                end
+            end
+            -- Unanchor old parts that are no longer in character
+            local oldAnchorList = anchoredParts[name]
+            if oldAnchorList then
+                for _, part in ipairs(oldAnchorList) do
+                    if not part.Parent then
+                        -- removed
+                    elseif not table.find(newAnchorList, part) then
+                        pcall(function() part.Anchored = false end)
+                    end
+                end
+            end
+            anchoredParts[name] = newAnchorList
         end
 
-        -- Clean up disabledAttachments for players who left
+        -- Cleanup for players who left
         for name, list in pairs(disabledAttachments) do
             local plr = Players:FindFirstChild(name)
             if not plr then
@@ -2681,6 +2723,15 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                     if inst.Parent then pcall(function() inst.Enabled = true end) end
                 end
                 disabledAttachments[name] = nil
+            end
+        end
+        for name, list in pairs(anchoredParts) do
+            local plr = Players:FindFirstChild(name)
+            if not plr then
+                for _, part in ipairs(list) do
+                    if part.Parent then pcall(function() part.Anchored = false end) end
+                end
+                anchoredParts[name] = nil
             end
         end
     end
@@ -2762,13 +2813,20 @@ Players.PlayerRemoving:Connect(function(p)
     killSources.everyone[name] = nil
     killSources.goodKarma[name] = nil
     killSources.evilKarma[name] = nil
-    -- NEW: re‑enable any disabled attachments for the leaving player
-    local list = disabledAttachments[name]
-    if list then
-        for _, inst in ipairs(list) do
+    -- Re‑enable attachments and unanchor for the leaving player
+    local attachList = disabledAttachments[name]
+    if attachList then
+        for _, inst in ipairs(attachList) do
             if inst.Parent then pcall(function() inst.Enabled = true end) end
         end
         disabledAttachments[name] = nil
+    end
+    local anchorList = anchoredParts[name]
+    if anchorList then
+        for _, part in ipairs(anchorList) do
+            if part.Parent then pcall(function() part.Anchored = false end) end
+        end
+        anchoredParts[name] = nil
     end
     refreshKillerDropdowns()
 end)
@@ -3289,15 +3347,23 @@ end))
 
 SetToggle[ui.walkOnWaterBtn](true)
 
--- Cleanup on script unload (no attachments/physics to revert)
+-- Cleanup on script unload (re‑enable all attachments and unanchor all parts)
 local function onUnload()
-    -- NEW: Re‑enable all disabled attachments before destroying
+    -- Re‑enable attachments
     for _, list in pairs(disabledAttachments) do
         for _, inst in ipairs(list) do
             if inst.Parent then pcall(function() inst.Enabled = true end) end
         end
     end
     table.clear(disabledAttachments)
+    -- Unanchor parts
+    for _, list in pairs(anchoredParts) do
+        for _, part in ipairs(list) do
+            if part.Parent then pcall(function() part.Anchored = false end) end
+        end
+    end
+    table.clear(anchoredParts)
+    
     for _, loop in ipairs(getgenv().ML_Expert_Loops or {}) do pcall(task.cancel, loop) end
     if getgenv().ML_Expert_UI then pcall(function() getgenv().ML_Expert_UI:Destroy() end) end
     if states.flyBody then
