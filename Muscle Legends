@@ -1,4 +1,4 @@
--- Muscle Legends Hub (with Killer tab + Attachment & Anchor Management integrated)
+-- Muscle Legends Hub (with Killer tab + Pre‑teleport Anchor & Attachment Management)
 -- All UI elements stored in a single 'ui' table to avoid local register overflow.
 
 getgenv().ML_Expert_UI = nil
@@ -114,9 +114,9 @@ local killSources = {
     evilKarma = {},   -- [username] = true
 }
 
--- NEW: Track disabled attachments for re‑enabling
+-- Track disabled attachments for re‑enabling
 local disabledAttachments = {}  -- [username] = { Motor6D/Weld/WeldConstraint, ... }
--- NEW: Track anchored parts for re‑enabling
+-- Track anchored parts for re‑enabling
 local anchoredParts = {}        -- [username] = { BasePart, BasePart, ... }
 
 -- ==================== ROCK DATA ====================
@@ -921,7 +921,7 @@ end)
 ui.dropdownSetters["selectMethod"] = ui.selectMethodDD
 ui.dropdownHeaderSetters["selectMethod"] = ui.selectMethodDD
 
--- NEW: Added "Punch" to tool dropdown
+-- Added "Punch" to tool dropdown
 ui.toolDD = createDropdown(f1, "Tool Dropdown", {"Weight", "Pushups", "Situps", "Handstands", "Punch"}, false, function(v) states.selectedTool = v end)
 ui.dropdownSetters["toolDropdown"] = ui.toolDD
 ui.dropdownHeaderSetters["toolDropdown"] = ui.toolDD
@@ -1383,7 +1383,7 @@ petDetails = Instance.new("TextLabel", f3); petDetails.Size = UDim2.new(1, -10, 
 petDetails.TextColor3 = Color3.new(1, 1, 1); petDetails.TextXAlignment = Enum.TextXAlignment.Left; petDetails.TextYAlignment = Enum.TextYAlignment.Top
 petDetails.Text = "Select a Pet to view stats"
 
--- NEW: Added proper state tables assignment
+-- Proper state tables assignment
 basicDD = createDropdown(f3, "Basic Pets", {"Nothing Here"}, false, function(l)
     states.currentPetLabel = l
     states.currentPetTable = "Basic"
@@ -1417,7 +1417,7 @@ auraDetails = Instance.new("TextLabel", f3); auraDetails.Size = UDim2.new(1, -10
 auraDetails.BackgroundTransparency = 1; auraDetails.TextColor3 = Color3.new(1, 1, 1); auraDetails.TextXAlignment = Enum.TextXAlignment.Left; auraDetails.TextYAlignment = Enum.TextYAlignment.Top
 auraDetails.Text = "Select an Aura to view stats"
 
--- NEW: Added proper state tables assignment
+-- Proper state tables assignment
 auraBasicDD = createDropdown(f3, "Basic Auras", {"Nothing Here"}, false, function(l)
     states.currentAuraLabel = l
     states.currentAuraTable = "Basic"
@@ -2536,9 +2536,9 @@ ui.autoEvilKarmaToggle = createToggle(f_killer, "Auto Evil Karma", "autoEvilKarm
     return val
 end)
 
--- ==================== KILLER LOOPS (Torso teleport + attachment & anchor management) ====================
+-- ==================== KILLER LOOPS (Pre‑teleport Anchor + Attachment Disable) ====================
 
--- Main kill loop (teleport + attack) – unchanged.
+-- Main kill loop: now anchors/disables BEFORE teleporting the target's torso.
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         task.wait(0.05)
@@ -2562,94 +2562,36 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         local myRightHand = myChar:FindFirstChild("RightHand") or myChar:FindFirstChild("Right Arm")
         if not myRightHand then continue end
         
-        -- Teleport torso of each effective target to my right hand and fire punch
+        -- Process each target
         for targetName in pairs(effective) do
             local targetPlayer = Players:FindFirstChild(targetName)
-            if targetPlayer and targetPlayer.Character then
-                local torso = findTorso(targetPlayer.Character)
-                if torso then
-                    torso.CFrame = myRightHand.CFrame
-                    pcall(function()
-                        player.muscleEvent:FireServer("punch", "rightHand")
-                    end)
-                end
-            end
-        end
-    end
-end))
-
--- NEW: Combined attachment disabling & body anchoring loop.
-table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
-    while true do
-        task.wait(0.2)
-        if states.stopEverything then continue end
-
-        local anyKillActive = killerState.killSelectedEnabled or killerState.killEveryoneEnabled
-            or killerState.autoGoodKarmaEnabled or killerState.autoEvilKarmaEnabled
-        local punch = getPunch()
-        local hasPunch = punch and punch.Parent == player.Character
-
-        -- If no kill toggles or no punch held, re‑enable everything
-        if not anyKillActive or not hasPunch then
-            -- Re‑enable attachments
-            for _, list in pairs(disabledAttachments) do
-                for _, inst in ipairs(list) do
-                    if inst.Parent then pcall(function() inst.Enabled = true end) end
-                end
-            end
-            table.clear(disabledAttachments)
-            -- Unanchor parts
-            for _, list in pairs(anchoredParts) do
-                for _, part in ipairs(list) do
-                    if part.Parent then pcall(function() part.Anchored = false end) end
-                end
-            end
-            table.clear(anchoredParts)
-            continue
-        end
-
-        -- Build effective target set
-        local targets = {}
-        for srcName, srcSet in pairs(killSources) do
-            for name, _ in pairs(srcSet) do
-                targets[name] = true
-            end
-        end
-
-        -- Process all players
-        for _, otherPlayer in ipairs(Players:GetPlayers()) do
-            if otherPlayer == player then continue end
-            local name = otherPlayer.Name
-            local char = otherPlayer.Character
-
-            if not targets[name] or not char then
-                -- Not a target, clean up attachments and anchors
-                local attachList = disabledAttachments[name]
-                if attachList then
-                    for _, inst in ipairs(attachList) do
-                        if inst.Parent then pcall(function() inst.Enabled = true end) end
-                    end
-                    disabledAttachments[name] = nil
-                end
-                local anchorList = anchoredParts[name]
-                if anchorList then
-                    for _, part in ipairs(anchorList) do
-                        if part.Parent then pcall(function() part.Anchored = false end) end
-                    end
-                    anchoredParts[name] = nil
-                end
-                continue
-            end
-
-            -- Find torso
+            if not targetPlayer or not targetPlayer.Character then continue end
+            local char = targetPlayer.Character
             local torso = findTorso(char)
-            if not torso then
-                disabledAttachments[name] = nil
-                anchoredParts[name] = nil
-                continue
-            end
+            if not torso then continue end
 
-            -- ===== ATTACHMENTS: disable non‑torso joints =====
+            -- 1. Anchor all BaseParts except the torso (and its synonyms)
+            local newAnchorList = {}
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") and part ~= torso and part.Name ~= "Torso" and part.Name ~= "UpperTorso" and part.Name ~= "HumanoidRootPart" then
+                    if not part.Anchored then
+                        part.Anchored = true
+                    end
+                    table.insert(newAnchorList, part)
+                end
+            end
+            -- Unanchor old parts that are no longer in the character
+            local oldAnchorList = anchoredParts[targetName]
+            if oldAnchorList then
+                for _, part in ipairs(oldAnchorList) do
+                    if not part.Parent or not table.find(newAnchorList, part) then
+                        pcall(function() part.Anchored = false end)
+                    end
+                end
+            end
+            anchoredParts[targetName] = newAnchorList
+
+            -- 2. Disable all non‑torso Motor6D/Weld/WeldConstraint joints
             local newAttachList = {}
             for _, desc in ipairs(char:GetDescendants()) do
                 if desc:IsA("Motor6D") or desc:IsA("Weld") or desc:IsA("WeldConstraint") then
@@ -2661,9 +2603,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                         part0 = desc.Part0
                         part1 = desc.Part1
                     end
-                    if part0 == torso or part1 == torso then
-                        continue
-                    end
+                    if part0 == torso or part1 == torso then continue end
                     if desc.Enabled ~= false then
                         desc.Enabled = false
                     end
@@ -2671,68 +2611,52 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
                 end
             end
             -- Re‑enable old attachments that are gone now
-            local oldAttachList = disabledAttachments[name]
+            local oldAttachList = disabledAttachments[targetName]
             if oldAttachList then
                 for _, inst in ipairs(oldAttachList) do
-                    if not inst.Parent then
-                        -- already removed
-                    elseif not table.find(newAttachList, inst) then
+                    if not inst.Parent or not table.find(newAttachList, inst) then
                         pcall(function() inst.Enabled = true end)
                     end
                 end
             end
-            disabledAttachments[name] = newAttachList
+            disabledAttachments[targetName] = newAttachList
 
-            -- ===== ANCHOR: anchor all BaseParts except torso =====
-            local newAnchorList = {}
-            for _, part in ipairs(char:GetDescendants()) do
-                if part:IsA("BasePart") and part ~= torso then
-                    if part.Name ~= "HumanoidRootPart" then  -- skip if it's the root part if torso==HRP
-                        -- skip parts named Torso, UpperTorso explicitly as well
-                    end
-                    -- Ensure we skip torso parts themselves
-                    if part == torso then continue end
-                    if part.Name == "Torso" or part.Name == "UpperTorso" or part.Name == "HumanoidRootPart" then
-                        continue
-                    end
-                    if not part.Anchored then
-                        part.Anchored = true
-                    end
-                    table.insert(newAnchorList, part)
-                end
-            end
-            -- Unanchor old parts that are no longer in character
-            local oldAnchorList = anchoredParts[name]
-            if oldAnchorList then
-                for _, part in ipairs(oldAnchorList) do
-                    if not part.Parent then
-                        -- removed
-                    elseif not table.find(newAnchorList, part) then
-                        pcall(function() part.Anchored = false end)
-                    end
-                end
-            end
-            anchoredParts[name] = newAnchorList
+            -- 3. Teleport the torso to our right hand and punch
+            torso.CFrame = myRightHand.CFrame
+            pcall(function()
+                player.muscleEvent:FireServer("punch", "rightHand")
+            end)
         end
+    end
+end))
 
-        -- Cleanup for players who left
-        for name, list in pairs(disabledAttachments) do
-            local plr = Players:FindFirstChild(name)
-            if not plr then
+-- Cleanup loop: reverts all changes when kill is turned off or punch is unequipped.
+-- It no longer does any anchoring/disabling; that's handled in the main loop above.
+table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
+    while true do
+        task.wait(0.3)
+        if states.stopEverything then continue end
+
+        local anyKillActive = killerState.killSelectedEnabled or killerState.killEveryoneEnabled
+            or killerState.autoGoodKarmaEnabled or killerState.autoEvilKarmaEnabled
+        local punch = getPunch()
+        local hasPunch = punch and punch.Parent == player.Character
+
+        if not anyKillActive or not hasPunch then
+            -- Re‑enable all disabled attachments
+            for _, list in pairs(disabledAttachments) do
                 for _, inst in ipairs(list) do
                     if inst.Parent then pcall(function() inst.Enabled = true end) end
                 end
-                disabledAttachments[name] = nil
             end
-        end
-        for name, list in pairs(anchoredParts) do
-            local plr = Players:FindFirstChild(name)
-            if not plr then
+            table.clear(disabledAttachments)
+            -- Unanchor all anchored parts
+            for _, list in pairs(anchoredParts) do
                 for _, part in ipairs(list) do
                     if part.Parent then pcall(function() part.Anchored = false end) end
                 end
-                anchoredParts[name] = nil
             end
+            table.clear(anchoredParts)
         end
     end
 end))
