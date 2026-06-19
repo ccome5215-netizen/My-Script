@@ -2536,9 +2536,9 @@ ui.autoEvilKarmaToggle = createToggle(f_killer, "Auto Evil Karma", "autoEvilKarm
     return val
 end)
 
--- ==================== KILLER LOOPS (Pre‑teleport Anchor + Attachment Disable) ====================
+-- ==================== KILLER LOOPS (Rapid Left/Right hand teleport & punch) ====================
 
--- Main kill loop: now anchors/disables BEFORE teleporting the target's torso.
+-- Main kill loop: anchors/disables once, then teleports torso alternately to left and right hand.
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         task.wait(0.05)
@@ -2559,8 +2559,9 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         
         local myChar = player.Character
         if not myChar then continue end
+        local myLeftHand = myChar:FindFirstChild("LeftHand") or myChar:FindFirstChild("Left Arm")
         local myRightHand = myChar:FindFirstChild("RightHand") or myChar:FindFirstChild("Right Arm")
-        if not myRightHand then continue end
+        if not myLeftHand or not myRightHand then continue end
         
         -- Process each target
         for targetName in pairs(effective) do
@@ -2570,7 +2571,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             local torso = findTorso(char)
             if not torso then continue end
 
-            -- 1. Anchor all BaseParts except the torso (and its synonyms)
+            -- Anchor all BaseParts except the torso (and its synonyms)
             local newAnchorList = {}
             for _, part in ipairs(char:GetDescendants()) do
                 if part:IsA("BasePart") and part ~= torso and part.Name ~= "Torso" and part.Name ~= "UpperTorso" and part.Name ~= "HumanoidRootPart" then
@@ -2591,7 +2592,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             end
             anchoredParts[targetName] = newAnchorList
 
-            -- 2. Disable all non‑torso Motor6D/Weld/WeldConstraint joints
+            -- Disable all non‑torso Motor6D/Weld/WeldConstraint joints
             local newAttachList = {}
             for _, desc in ipairs(char:GetDescendants()) do
                 if desc:IsA("Motor6D") or desc:IsA("Weld") or desc:IsA("WeldConstraint") then
@@ -2621,7 +2622,13 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             end
             disabledAttachments[targetName] = newAttachList
 
-            -- 3. Teleport the torso to our right hand and punch
+            -- Teleport to left hand, punch left
+            torso.CFrame = myLeftHand.CFrame
+            pcall(function()
+                player.muscleEvent:FireServer("punch", "leftHand")
+            end)
+            
+            -- Teleport to right hand, punch right
             torso.CFrame = myRightHand.CFrame
             pcall(function()
                 player.muscleEvent:FireServer("punch", "rightHand")
@@ -2631,7 +2638,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
 end))
 
 -- Cleanup loop: reverts all changes when kill is turned off or punch is unequipped.
--- It no longer does any anchoring/disabling; that's handled in the main loop above.
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         task.wait(0.3)
