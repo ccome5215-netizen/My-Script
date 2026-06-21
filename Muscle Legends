@@ -1106,9 +1106,9 @@ local petRefsBasic, petRefsAdv, petRefsRare, petRefsEpic, petRefsUnique = {}, {}
 local auraRefsBasic, auraRefsAdv, auraRefsRare, auraRefsEpic, auraRefsUnique = {}, {}, {}, {}, {}
 
 -- ==================== PET/AURA TRACKING ====================
-local itemStates = {}
-local newItems = {}
-local changedItems = {}
+local itemStates = {} -- Stores the last known state of an item
+local newItems = {}   -- Stores items that are newly added
+local changedItems = {} -- Stores items that have changed values
 
 local function getPetAuraState(item)
     local state = {}
@@ -1143,7 +1143,7 @@ local function setupItemTracking(item)
         if not itemStates[item] then return end
         local newState = getPetAuraState(item)
         if not compareStates(itemStates[item], newState) then
-            changedItems[item] = tick()
+            changedItems[item] = true -- Mark as changed permanently until selected
             itemStates[item] = newState
         end
     end
@@ -1174,24 +1174,8 @@ local function refreshPetDropdown(folder, dropdownObj, refStore)
         if refStore then table.clear(refStore) end
         return
     end
-    local counts = {}
-    local options = {}
-    local itemRefs = {}
     
-    for _, item in ipairs(folder:GetChildren()) do
-        if not itemStates[item] then
-            newItems[item] = true
-            itemStates[item] = getPetAuraState(item)
-            setupItemTracking(item)
-        else
-            local newState = getPetAuraState(item)
-            if not compareStates(itemStates[item], newState) then
-                changedItems[item] = tick()
-                itemStates[item] = newState
-            end
-        end
-    end
-    
+    -- Clear tracking for items no longer in this folder
     for item in pairs(itemStates) do
         if not item.Parent or item.Parent ~= folder then
             itemStates[item] = nil
@@ -1200,15 +1184,39 @@ local function refreshPetDropdown(folder, dropdownObj, refStore)
         end
     end
 
+    local counts = {}
+    local options = {}
+    local itemRefs = {}
+    
+    -- Initial Scan for New Items
+    for _, item in ipairs(folder:GetChildren()) do
+        if not itemStates[item] then
+            -- Only mark as new if we haven't seen it before in this session for this player
+            newItems[item] = true
+            itemStates[item] = getPetAuraState(item)
+            setupItemTracking(item)
+        else
+            -- Update state silently if it exists
+            local newState = getPetAuraState(item)
+            if not compareStates(itemStates[item], newState) then
+                changedItems[item] = true
+                itemStates[item] = newState
+            end
+        end
+    end
+
+    -- Build Dropdown Options
     for _, item in ipairs(folder:GetChildren()) do
         local baseName = item.Name
         counts[baseName] = (counts[baseName] or 0) + 1
         local cleanName = baseName .. " #" .. counts[baseName]
         local finalName = cleanName
         
+        -- Apply Marks
         if newItems[item] then
             finalName = finalName .. " *NEW*"
-        elseif changedItems[item] and (tick() - changedItems[item] < 3) then
+        end
+        if changedItems[item] then
             finalName = finalName .. " *CHANGED*"
         end
         
@@ -1236,12 +1244,39 @@ end
 
 local function handleItemSelection(label, refTable, detailLabel)
     if not label or label == "Nothing Here" then return end
-    local item = refTable[label]
-    if not item then
-        local stripped = label:gsub(" %*NEW%*", ""):gsub(" %*CHANGED%*", "")
-        item = refTable[stripped]
-    end
+    
+    -- Strip marks to find the real reference
+    local stripped = label:gsub(" %*NEW%*", ""):gsub(" %*CHANGED%*", "")
+    local item = refTable[stripped] or refTable[label]
+    
     if item then
+        -- Remove CHANGED mark upon selection
+        if changedItems[item] then
+            changedItems[item] = nil
+            -- Refresh the dropdown to remove the mark visually
+            local tp = Players:FindFirstChild(states.statsTarget)
+            if tp then
+                local petsF = tp:FindFirstChild("petsFolder")
+                if petsF then
+                    if refTable == petRefsBasic then refreshPetDropdown(petsF:FindFirstChild("Basic"), basicDD, petRefsBasic)
+                    elseif refTable == petRefsAdv then refreshPetDropdown(petsF:FindFirstChild("Advanced"), advDD, petRefsAdv)
+                    elseif refTable == petRefsRare then refreshPetDropdown(petsF:FindFirstChild("Rare"), rareDD, petRefsRare)
+                    elseif refTable == petRefsEpic then refreshPetDropdown(petsF:FindFirstChild("Epic"), epicDD, petRefsEpic)
+                    elseif refTable == petRefsUnique then refreshPetDropdown(petsF:FindFirstChild("Unique"), uniqueDD, petRefsUnique)
+                    end
+                end
+                local powerUpsF = tp:FindFirstChild("powerUpsFolder")
+                if powerUpsF then
+                    if refTable == auraRefsBasic then refreshPetDropdown(powerUpsF:FindFirstChild("Basic"), auraBasicDD, auraRefsBasic)
+                    elseif refTable == auraRefsAdv then refreshPetDropdown(powerUpsF:FindFirstChild("Advanced"), auraAdvDD, auraRefsAdv)
+                    elseif refTable == auraRefsRare then refreshPetDropdown(powerUpsF:FindFirstChild("Rare"), auraRareDD, auraRefsRare)
+                    elseif refTable == auraRefsEpic then refreshPetDropdown(powerUpsF:FindFirstChild("Epic"), auraEpicDD, auraRefsEpic)
+                    elseif refTable == auraRefsUnique then refreshPetDropdown(powerUpsF:FindFirstChild("Unique"), auraUniqueDD, auraRefsUnique)
+                    end
+                end
+            end
+        end
+
         local newState = getPetAuraState(item)
         itemStates[item] = newState
         local isEvolved = newState.evolved
@@ -3052,44 +3087,6 @@ end
 nameMap = currentMap
 statsPlayerDD.refresh(statsList)
 end
-end))
-
--- ==================== PET/AURA EXPIRATION LOOP ====================
-table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
-    while true do
-        task.wait(1)
-        if states.stopEverything then continue end
-        if states.statsTarget then
-            local hasExpiring = false
-            for item, time in pairs(changedItems) do
-                if tick() - time >= 3 then
-                    hasExpiring = true
-                    break
-                end
-            end
-            if hasExpiring then
-                local tp = Players:FindFirstChild(states.statsTarget)
-                if tp then
-                    local petsF = tp:FindFirstChild("petsFolder")
-                    if petsF then
-                        refreshPetDropdown(petsF:FindFirstChild("Basic"), basicDD, petRefsBasic)
-                        refreshPetDropdown(petsF:FindFirstChild("Advanced"), advDD, petRefsAdv)
-                        refreshPetDropdown(petsF:FindFirstChild("Rare"), rareDD, petRefsRare)
-                        refreshPetDropdown(petsF:FindFirstChild("Epic"), epicDD, petRefsEpic)
-                        refreshPetDropdown(petsF:FindFirstChild("Unique"), uniqueDD, petRefsUnique)
-                    end
-                    local powerUpsF = tp:FindFirstChild("powerUpsFolder")
-                    if powerUpsF then
-                        refreshPetDropdown(powerUpsF:FindFirstChild("Basic"), auraBasicDD, auraRefsBasic)
-                        refreshPetDropdown(powerUpsF:FindFirstChild("Advanced"), auraAdvDD, auraRefsAdv)
-                        refreshPetDropdown(powerUpsF:FindFirstChild("Rare"), auraRareDD, auraRefsRare)
-                        refreshPetDropdown(powerUpsF:FindFirstChild("Epic"), auraEpicDD, auraRefsEpic)
-                        refreshPetDropdown(powerUpsF:FindFirstChild("Unique"), auraUniqueDD, auraRefsUnique)
-                    end
-                end
-            end
-        end
-    end
 end))
 
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
