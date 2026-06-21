@@ -1208,6 +1208,11 @@ local auraBasicDD, auraAdvDD, auraRareDD, auraEpicDD, auraUniqueDD
 local petDetails, auraDetails
 local petRefsBasic, petRefsAdv, petRefsRare, petRefsEpic, petRefsUnique = {}, {}, {}, {}, {}
 local auraRefsBasic, auraRefsAdv, auraRefsRare, auraRefsEpic, auraRefsUnique = {}, {}, {}, {}, {}
+-- Track new/changed items
+local newItems = {}        -- [displayName] = true (permanent until player change)
+local changedItems = {}    -- [displayName] = timestamp (removed after 3 sec)
+local previousPetStats = {} -- [displayName] = {exp, level, evolved} for change detection
+local previousAuraStats = {} -- [displayName] = {exp, level, evolved} for change detection
 
 local function refreshPetDropdown(folder, dropdownObj, refStore)
     if not folder then
@@ -1222,8 +1227,42 @@ local function refreshPetDropdown(folder, dropdownObj, refStore)
         local baseName = item.Name
         counts[baseName] = (counts[baseName] or 0) + 1
         local displayName = baseName .. " #" .. counts[baseName]
-        table.insert(options, displayName)
-        itemRefs[displayName] = item
+        
+        -- Check if this is a NEW item (not seen before in this session for this player)
+        if not newItems[displayName] and not previousPetStats[displayName] and not previousAuraStats[displayName] then
+            newItems[displayName] = true
+        end
+        
+        -- Check for CHANGED stats
+        local currentExp = item:FindFirstChild("exp") and item.exp.Value or 0
+        local currentLevel = item:FindFirstChild("level") and item.level.Value or 1
+        local evObj = item:FindFirstChild("Evolved") or item:FindFirstChild("evolved")
+        local currentEvolved = evObj and evObj:IsA("BoolValue") and evObj.Value or false
+        
+        if previousPetStats[displayName] or previousAuraStats[displayName] then
+            local prev = previousPetStats[displayName] or previousAuraStats[displayName]
+            if prev.exp ~= currentExp or prev.level ~= currentLevel or prev.evolved ~= currentEvolved then
+                changedItems[displayName] = tick()
+                -- Update stored stats
+                previousPetStats[displayName] = {exp = currentExp, level = currentLevel, evolved = currentEvolved}
+                previousAuraStats[displayName] = {exp = currentExp, level = currentLevel, evolved = currentEvolved}
+            end
+        else
+            -- First time seeing this item, store initial stats
+            previousPetStats[displayName] = {exp = currentExp, level = currentLevel, evolved = currentEvolved}
+            previousAuraStats[displayName] = {exp = currentExp, level = currentLevel, evolved = currentEvolved}
+        end
+        
+        -- Build display name with markers
+        local finalDisplayName = displayName
+        if newItems[displayName] then
+            finalDisplayName = displayName .. " *NEW*"
+        elseif changedItems[displayName] then
+            finalDisplayName = displayName .. " *CHANGED*"
+        end
+        
+        table.insert(options, finalDisplayName)
+        itemRefs[displayName] = item  -- Store with clean name for lookup
     end
     if #options == 0 then
         options = {"Nothing Here"}
@@ -1246,7 +1285,9 @@ end
 
 local function handleItemSelection(label, refTable, detailLabel)
     if not label or label == "Nothing Here" then return end
-    local cleanLabel = label:gsub("%s*%[[^%]]+%]%s*", "")
+    -- Strip *NEW* and *CHANGED* markers from label
+    local cleanLabel = label:gsub("%s*%*NEW%*", ""):gsub("%s*%*CHANGED%*", "")
+    cleanLabel = cleanLabel:gsub("%s*%[[^%]]+%]%s*", "")
     local item = refTable[cleanLabel] or refTable[label]
     if item then
         local isEvolved = false
@@ -1281,6 +1322,10 @@ local function clearPetAuraUI()
     if auraRareDD then auraRareDD.refresh({"Nothing Here"}); auraRareDD.setHeaderText("Rare Auras v") end
     if auraEpicDD then auraEpicDD.refresh({"Nothing Here"}); auraEpicDD.setHeaderText("Epic Auras v") end
     if auraUniqueDD then auraUniqueDD.refresh({"Nothing Here"}); auraUniqueDD.setHeaderText("Unique Auras v") end
+    -- Clear tracking tables for NEW items (permanent until player change)
+    table.clear(newItems)
+    table.clear(previousPetStats)
+    table.clear(previousAuraStats)
 end
 
 local function resetStatsUI()
@@ -1295,7 +1340,9 @@ local function resetStatsUI()
 end
 
 statsPlayerDD = createDropdown(f3, "Player Dropdown", {}, false, function(label)
-    local newTarget = nameMap[label] or label
+    -- Strip [Me] marker if present
+    local cleanLabel = label:gsub("%s*%[Me%]", "")
+    local newTarget = nameMap[cleanLabel] or cleanLabel
     if states.statsTarget ~= newTarget then
         states.statsTarget = newTarget
         lastStatValues = {}
@@ -2317,6 +2364,10 @@ local function refreshKillerDropdowns()
             table.insert(playerOptions, getPlayerDisplayString(p))
         end
     end
+    -- Add "No one" option if no players available
+    if #playerOptions == 0 then
+        table.insert(playerOptions, "No one")
+    end
     if ui.killerPlayerDD then
         ui.killerPlayerDD.refresh(playerOptions)
     end
@@ -3042,17 +3093,26 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
 end))
 
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
-    while task.wait(1) do
+    while task.wait(0.5) do
         if states.stopEverything then continue end
-        if states.autoFortuneWheel then
-            pcall(function()
-                local args = {
-                    [1] = "openFortuneWheel",
-                    [2] = game:GetService("ReplicatedStorage").fortuneWheelChances:FindFirstChild("Fortune Wheel"),
-                }
-                game:GetService("ReplicatedStorage").rEvents.openFortuneWheelRemote:InvokeServer(unpack(args))
-            end)
+        -- Remove *CHANGED* markers after 3 seconds
+        local now = tick()
+        for displayName, timestamp in pairs(changedItems) do
+            if now - timestamp >= 3 then
+                changedItems[displayName] = nil
+            end
         end
+        -- Refresh dropdowns to update display (remove CHANGED markers)
+        if basicDD then refreshPetDropdown(player:FindFirstChild("petsFolder") and player:FindFirstChild("petsFolder"):FindFirstChild("Basic"), basicDD, petRefsBasic) end
+        if advDD then refreshPetDropdown(player:FindFirstChild("petsFolder") and player:FindFirstChild("petsFolder"):FindFirstChild("Advanced"), advDD, petRefsAdv) end
+        if rareDD then refreshPetDropdown(player:FindFirstChild("petsFolder") and player:FindFirstChild("petsFolder"):FindFirstChild("Rare"), rareDD, petRefsRare) end
+        if epicDD then refreshPetDropdown(player:FindFirstChild("petsFolder") and player:FindFirstChild("petsFolder"):FindFirstChild("Epic"), epicDD, petRefsEpic) end
+        if uniqueDD then refreshPetDropdown(player:FindFirstChild("petsFolder") and player:FindFirstChild("petsFolder"):FindFirstChild("Unique"), uniqueDD, petRefsUnique) end
+        if auraBasicDD then refreshPetDropdown(player:FindFirstChild("powerUpsFolder") and player:FindFirstChild("powerUpsFolder"):FindFirstChild("Basic"), auraBasicDD, auraRefsBasic) end
+        if auraAdvDD then refreshPetDropdown(player:FindFirstChild("powerUpsFolder") and player:FindFirstChild("powerUpsFolder"):FindFirstChild("Advanced"), auraAdvDD, auraRefsAdv) end
+        if auraRareDD then refreshPetDropdown(player:FindFirstChild("powerUpsFolder") and player:FindFirstChild("powerUpsFolder"):FindFirstChild("Rare"), auraRareDD, auraRefsRare) end
+        if auraEpicDD then refreshPetDropdown(player:FindFirstChild("powerUpsFolder") and player:FindFirstChild("powerUpsFolder"):FindFirstChild("Epic"), auraEpicDD, auraRefsEpic) end
+        if auraUniqueDD then refreshPetDropdown(player:FindFirstChild("powerUpsFolder") and player:FindFirstChild("powerUpsFolder"):FindFirstChild("Unique"), auraUniqueDD, auraRefsUnique) end
     end
 end))
 
@@ -3151,6 +3211,9 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
             table.insert(statsList, dName)
         end
         nameMap = currentMap
+        -- Always include "Me" for stats dropdown
+        local meEntry = player.DisplayName .. " (@@" .. player.Name .. ") [Me]"
+        table.insert(statsList, 1, meEntry)
         statsPlayerDD.refresh(statsList)
     end
 end))
