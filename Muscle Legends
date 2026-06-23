@@ -1,4 +1,4 @@
--- Muscle Legends Hub (with Killer tab + Pre‑teleport Anchor & Attachment Management + Torso Size)
+-- Muscle Legends Hub (Dual-Hand Killer + Fixed Pet/Aura Tracking)
 -- All UI elements stored in a single 'ui' table to avoid local register overflow.
 -- ==================== SAFE CLEANUP ====================
 local oldUI = getgenv().ML_Expert_UI
@@ -102,21 +102,13 @@ killEveryoneEnabled = false,
 autoGoodKarmaEnabled = false,
 autoEvilKarmaEnabled = false,
 }
--- Combined target sources
+-- Combined target sources (used to build effective set)
 local killSources = {
 selected = {},    -- [username] = true
 everyone = {},    -- [username] = true
 goodKarma = {},   -- [username] = true
 evilKarma = {},   -- [username] = true
 }
--- Track disabled attachments for re‑enabling
-local disabledAttachments = {}  -- [username] = { Motor6D/Weld/WeldConstraint, ... }
--- Track anchored parts for re‑enabling
-local anchoredParts = {}        -- [username] = { BasePart, BasePart, ... }
--- Track original torso sizes for client-side visual restoration
-local originalTorsoSize = {}    -- [username] = Vector3
--- Killer toggle hand (like auto glitch)
-local killerToggleHand = false  -- flips between left/right each target
 -- ==================== ROCK DATA ====================
 local rockData = {
 ["Tiny Rock"]        = {req = 0,       name = "Tiny Rock",           idx = 1, glitchValue = 0.025},
@@ -1105,10 +1097,11 @@ local petDetails, auraDetails
 local petRefsBasic, petRefsAdv, petRefsRare, petRefsEpic, petRefsUnique = {}, {}, {}, {}, {}
 local auraRefsBasic, auraRefsAdv, auraRefsRare, auraRefsEpic, auraRefsUnique = {}, {}, {}, {}, {}
 
--- ==================== PET/AURA TRACKING ====================
-local itemStates = {} -- Stores the last known state of an item
-local newItems = {}   -- Stores items that are newly added
-local changedItems = {} -- Stores items that have changed values
+-- ==================== PET/AURA TRACKING (fixed) ====================
+local itemStates = {}
+local newItems = {}
+local changedItems = {}
+local initializedPlayers = {}  -- Track which players have been first-scanned
 
 local function getPetAuraState(item)
     local state = {}
@@ -1143,7 +1136,7 @@ local function setupItemTracking(item)
         if not itemStates[item] then return end
         local newState = getPetAuraState(item)
         if not compareStates(itemStates[item], newState) then
-            changedItems[item] = true -- Mark as changed permanently until selected
+            changedItems[item] = true
             itemStates[item] = newState
         end
     end
@@ -1175,6 +1168,9 @@ local function refreshPetDropdown(folder, dropdownObj, refStore)
         return
     end
     
+    local playerName = states.statsTarget
+    local isInitialized = initializedPlayers[playerName]
+    
     -- Clear tracking for items no longer in this folder
     for item in pairs(itemStates) do
         if not item.Parent or item.Parent ~= folder then
@@ -1188,15 +1184,15 @@ local function refreshPetDropdown(folder, dropdownObj, refStore)
     local options = {}
     local itemRefs = {}
     
-    -- Initial Scan for New Items
     for _, item in ipairs(folder:GetChildren()) do
         if not itemStates[item] then
-            -- Only mark as new if we haven't seen it before in this session for this player
-            newItems[item] = true
             itemStates[item] = getPetAuraState(item)
             setupItemTracking(item)
+            -- Only mark as new if the player has already been initialized before
+            if isInitialized then
+                newItems[item] = true
+            end
         else
-            -- Update state silently if it exists
             local newState = getPetAuraState(item)
             if not compareStates(itemStates[item], newState) then
                 changedItems[item] = true
@@ -1205,14 +1201,17 @@ local function refreshPetDropdown(folder, dropdownObj, refStore)
         end
     end
 
-    -- Build Dropdown Options
+    -- Mark player as initialized after the first scan
+    if not isInitialized then
+        initializedPlayers[playerName] = true
+    end
+
     for _, item in ipairs(folder:GetChildren()) do
         local baseName = item.Name
         counts[baseName] = (counts[baseName] or 0) + 1
         local cleanName = baseName .. " #" .. counts[baseName]
         local finalName = cleanName
         
-        -- Apply Marks
         if newItems[item] then
             finalName = finalName .. " *NEW*"
         end
@@ -1245,15 +1244,13 @@ end
 local function handleItemSelection(label, refTable, detailLabel)
     if not label or label == "Nothing Here" then return end
     
-    -- Strip marks to find the real reference
     local stripped = label:gsub(" %*NEW%*", ""):gsub(" %*CHANGED%*", "")
     local item = refTable[stripped] or refTable[label]
     
     if item then
-        -- Remove CHANGED mark upon selection
         if changedItems[item] then
             changedItems[item] = nil
-            -- Refresh the dropdown to remove the mark visually
+            -- Refresh the dropdown to remove the mark visually (simplified)
             local tp = Players:FindFirstChild(states.statsTarget)
             if tp then
                 local petsF = tp:FindFirstChild("petsFolder")
@@ -1319,6 +1316,7 @@ statGainTimes = {}
 itemStates = {}
 newItems = {}
 changedItems = {}
+initializedPlayers = {}
 if statsPlayerDD then statsPlayerDD.setHeaderText("Player Dropdown v") end
 if ui.trackToggle then SetToggle[ui.trackToggle](false) end
 clearPetAuraUI()
@@ -1334,6 +1332,7 @@ statGainTimes = {}
 itemStates = {}
 newItems = {}
 changedItems = {}
+initializedPlayers = {}  -- will mark newly selected player as not initialized
 statsPlayerDD.setHeaderText(label .. " v")
 states.trackStats = false
 if ui.trackToggle then SetToggle[ui.trackToggle](false) end
@@ -1377,7 +1376,6 @@ invHeader.Font = Enum.Font.SourceSansBold; invHeader.TextSize = 18
 petDetails = Instance.new("TextLabel", f3); petDetails.Size = UDim2.new(1, -10, 0, 140); petDetails.BackgroundTransparency = 1
 petDetails.TextColor3 = Color3.new(1, 1, 1); petDetails.TextXAlignment = Enum.TextXAlignment.Left; petDetails.TextYAlignment = Enum.TextYAlignment.Top
 petDetails.Text = "Select a Pet to view stats"
--- Proper state tables assignment
 basicDD = createDropdown(f3, "Basic Pets", {"Nothing Here"}, false, function(l)
 states.currentPetLabel = l
 states.currentPetTable = "Basic"
@@ -1408,7 +1406,6 @@ auraHeader.TextColor3 = Color3.fromRGB(200, 0, 200); auraHeader.Font = Enum.Font
 auraDetails = Instance.new("TextLabel", f3); auraDetails.Size = UDim2.new(1, -10, 0, 140)
 auraDetails.BackgroundTransparency = 1; auraDetails.TextColor3 = Color3.new(1, 1, 1); auraDetails.TextXAlignment = Enum.TextXAlignment.Left; auraDetails.TextYAlignment = Enum.TextYAlignment.Top
 auraDetails.Text = "Select an Aura to view stats"
--- Proper state tables assignment
 auraBasicDD = createDropdown(f3, "Basic Auras", {"Nothing Here"}, false, function(l)
 states.currentAuraLabel = l
 states.currentAuraTable = "Basic"
@@ -2426,144 +2423,140 @@ end
 end
 return val
 end)
--- ==================== KILLER LOOPS (Rapid alternating left/right hand teleport & punch + Torso Size) ====================
--- Main kill loop: anchor/disable once, then alternate teleport to left and right hand each iteration
+-- ==================== KILLER LOOPS (Dual Hand Independent Targeting) ====================
+
+-- Build a fresh set of all valid target usernames (not whitelisted, alive, with torso)
+local function getEffectiveTargetSet()
+    local effective = {}
+    for srcName, srcSet in pairs(killSources) do
+        for name, _ in pairs(srcSet) do
+            effective[name] = true
+        end
+    end
+    -- filter out players who are no longer valid
+    for name in pairs(effective) do
+        local targetPlayer = Players:FindFirstChild(name)
+        if not targetPlayer or not targetPlayer.Character or not findTorso(targetPlayer.Character) then
+            effective[name] = nil
+        end
+    end
+    return effective
+end
+
+-- Acquire a target for a hand that is not already used by the other hand
+local function acquireTarget(currentSet, usedByOther)
+    for name in pairs(currentSet) do
+        if name ~= usedByOther then
+            return name
+        end
+    end
+    return nil
+end
+
+-- Left hand attack loop
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
-while true do
-task.wait(0.05)
-if states.stopEverything then continue end
-local punchTool = getPunch()
-local hasPunch = punchTool and punchTool.Parent == player.Character
--- Build effective target set from all active sources
-local effective = {}
-for srcName, srcSet in pairs(killSources) do
-for name, _ in pairs(srcSet) do
-effective[name] = true
-end
-end
-if not hasPunch then continue end
-local myChar = player.Character
-if not myChar then continue end
-local myLeftHand = myChar:FindFirstChild("LeftHand") or myChar:FindFirstChild("Left Arm")
-local myRightHand = myChar:FindFirstChild("RightHand") or myChar:FindFirstChild("Right Arm")
-if not myLeftHand or not myRightHand then continue end
--- Process each target
-for targetName in pairs(effective) do
-local targetPlayer = Players:FindFirstChild(targetName)
-if not targetPlayer or not targetPlayer.Character then continue end
-local char = targetPlayer.Character
-local torso = findTorso(char)
-if not torso then continue end
--- Set torso size to 1 (client-side visual)
-if torso:IsA("BasePart") then
-if not originalTorsoSize[targetName] then
-originalTorsoSize[targetName] = torso.Size
-end
-pcall(function() torso.Size = Vector3.new(1, 1, 1) end)
-end
--- Anchor all BaseParts except the torso (and its synonyms)
-local newAnchorList = {}
-for _, part in ipairs(char:GetDescendants()) do
-if part:IsA("BasePart") and part ~= torso and part.Name ~= "Torso" and part.Name ~= "UpperTorso" and part.Name ~= "HumanoidRootPart" then
-if not part.Anchored then
-part.Anchored = true
-end
-table.insert(newAnchorList, part)
-end
-end
--- Unanchor old parts that are no longer in the character
-local oldAnchorList = anchoredParts[targetName]
-if oldAnchorList then
-for _, part in ipairs(oldAnchorList) do
-if not part.Parent or not table.find(newAnchorList, part) then
-pcall(function() part.Anchored = false end)
-end
-end
-end
-anchoredParts[targetName] = newAnchorList
--- Disable all non‑torso Motor6D/Weld/WeldConstraint joints
-local newAttachList = {}
-for _, desc in ipairs(char:GetDescendants()) do
-if desc:IsA("Motor6D") or desc:IsA("Weld") or desc:IsA("WeldConstraint") then
-local part0, part1 = nil, nil
-if desc:IsA("Motor6D") or desc:IsA("Weld") then
-part0 = desc.Part0
-part1 = desc.Part1
-elseif desc:IsA("WeldConstraint") then
-part0 = desc.Part0
-part1 = desc.Part1
-end
-if part0 == torso or part1 == torso then continue end
-if desc.Enabled ~= false then
-desc.Enabled = false
-end
-table.insert(newAttachList, desc)
-end
-end
--- Re‑enable old attachments that are gone now
-local oldAttachList = disabledAttachments[targetName]
-if oldAttachList then
-for _, inst in ipairs(oldAttachList) do
-if not inst.Parent or not table.find(newAttachList, inst) then
-pcall(function() inst.Enabled = true end)
-end
-end
-end
-disabledAttachments[targetName] = newAttachList
--- Alternate between left and right hand (like auto glitch)
-local handName, targetHand
-if killerToggleHand then
-handName = "leftHand"
-targetHand = myLeftHand
-else
-handName = "rightHand"
-targetHand = myRightHand
-end
-killerToggleHand = not killerToggleHand   -- flip for next target
--- Teleport to chosen hand and punch
-torso.CFrame = targetHand.CFrame
-pcall(function()
-player.muscleEvent:FireServer("punch", handName)
-end)
-end
-end
+    local leftTarget = nil
+    while true do
+        task.wait(0.05)
+        if states.stopEverything then continue end
+        
+        local punchTool = getPunch()
+        local hasPunch = punchTool and punchTool.Parent == player.Character
+        local anyKillActive = killerState.killSelectedEnabled or killerState.killEveryoneEnabled
+            or killerState.autoGoodKarmaEnabled or killerState.autoEvilKarmaEnabled
+        
+        if not hasPunch or not anyKillActive then
+            leftTarget = nil
+            continue
+        end
+        
+        local myChar = player.Character
+        if not myChar then continue end
+        local leftHand = myChar:FindFirstChild("LeftHand") or myChar:FindFirstChild("Left Arm")
+        if not leftHand then continue end
+        
+        local effectiveSet = getEffectiveTargetSet()
+        -- Only left hand can target if there are at least 2 enemies (so right can take one)
+        -- Actually left hand stays idle if only one target exists, because right hand will grab it
+        -- and left won't acquire the same.
+        if leftTarget then
+            -- Validate current target
+            local tp = Players:FindFirstChild(leftTarget)
+            if not tp or not tp.Character or not findTorso(tp.Character) then
+                leftTarget = nil
+            end
+        end
+        
+        if not leftTarget then
+            -- Try to get a new target, avoiding the right hand's target
+            local rightTarget = getgenv().rightHandTarget or nil  -- we'll use a shared variable
+            leftTarget = acquireTarget(effectiveSet, rightTarget)
+            if not leftTarget then continue end
+        end
+        
+        -- Attack left target
+        local tp = Players:FindFirstChild(leftTarget)
+        if tp and tp.Character then
+            local torso = findTorso(tp.Character)
+            if torso then
+                torso.CFrame = leftHand.CFrame
+                pcall(function()
+                    player.muscleEvent:FireServer("punch", "leftHand")
+                end)
+            end
+        end
+    end
 end))
--- Cleanup loop: reverts all changes when kill is turned off or punch is unequipped.
+
+-- Right hand attack loop
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
-while true do
-task.wait(0.3)
-if states.stopEverything then continue end
-local anyKillActive = killerState.killSelectedEnabled or killerState.killEveryoneEnabled
-or killerState.autoGoodKarmaEnabled or killerState.autoEvilKarmaEnabled
-local punch = getPunch()
-local hasPunch = punch and punch.Parent == player.Character
-if not anyKillActive or not hasPunch then
--- Re‑enable all disabled attachments
-for _, list in pairs(disabledAttachments) do
-for _, inst in ipairs(list) do
-if inst.Parent then pcall(function() inst.Enabled = true end) end
-end
-end
-table.clear(disabledAttachments)
--- Unanchor all anchored parts
-for _, list in pairs(anchoredParts) do
-for _, part in ipairs(list) do
-if part.Parent then pcall(function() part.Anchored = false end) end
-end
-end
-table.clear(anchoredParts)
--- Restore torso sizes
-for targetName, size in pairs(originalTorsoSize) do
-local targetPlayer = Players:FindFirstChild(targetName)
-if targetPlayer and targetPlayer.Character then
-local t = findTorso(targetPlayer.Character)
-if t then pcall(function() t.Size = size end) end
-end
-end
-table.clear(originalTorsoSize)
-end
-end
+    local rightTarget = nil
+    while true do
+        task.wait(0.05)
+        if states.stopEverything then continue end
+        
+        local punchTool = getPunch()
+        local hasPunch = punchTool and punchTool.Parent == player.Character
+        local anyKillActive = killerState.killSelectedEnabled or killerState.killEveryoneEnabled
+            or killerState.autoGoodKarmaEnabled or killerState.autoEvilKarmaEnabled
+        
+        if not hasPunch or not anyKillActive then
+            rightTarget = nil
+            continue
+        end
+        
+        local myChar = player.Character
+        if not myChar then continue end
+        local rightHand = myChar:FindFirstChild("RightHand") or myChar:FindFirstChild("Right Arm")
+        if not rightHand then continue end
+        
+        local effectiveSet = getEffectiveTargetSet()
+        if rightTarget then
+            local tp = Players:FindFirstChild(rightTarget)
+            if not tp or not tp.Character or not findTorso(tp.Character) then
+                rightTarget = nil
+            end
+        end
+        
+        if not rightTarget then
+            -- Right hand can take any target, left will avoid it
+            rightTarget = acquireTarget(effectiveSet, getgenv().leftHandTarget or nil)
+            if not rightTarget then continue end
+        end
+        
+        local tp = Players:FindFirstChild(rightTarget)
+        if tp and tp.Character then
+            local torso = findTorso(tp.Character)
+            if torso then
+                torso.CFrame = rightHand.CFrame
+                pcall(function()
+                    player.muscleEvent:FireServer("punch", "rightHand")
+                end)
+            end
+        end
+    end
 end))
+
 -- Karma check loop (unchanged)
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
 while true do
@@ -2636,31 +2629,6 @@ killSources.selected[name] = nil
 killSources.everyone[name] = nil
 killSources.goodKarma[name] = nil
 killSources.evilKarma[name] = nil
--- Re‑enable attachments and unanchor for the leaving player
-local attachList = disabledAttachments[name]
-if attachList then
-for _, inst in ipairs(attachList) do
-if inst.Parent then pcall(function() inst.Enabled = true end) end
-end
-disabledAttachments[name] = nil
-end
-local anchorList = anchoredParts[name]
-if anchorList then
-for _, part in ipairs(anchorList) do
-if part.Parent then pcall(function() part.Anchored = false end) end
-end
-anchoredParts[name] = nil
-end
--- Restore torso size for leaving player
-local torsoSize = originalTorsoSize[name]
-if torsoSize then
-local char = p.Character
-if char then
-local t = findTorso(char)
-if t then pcall(function() t.Size = torsoSize end) end
-end
-originalTorsoSize[name] = nil
-end
 refreshKillerDropdowns()
 end)
 refreshKillerDropdowns()
@@ -3126,31 +3094,8 @@ end
 end
 end))
 SetToggle[ui.walkOnWaterBtn](true)
--- Cleanup on script unload (re‑enable all attachments and unanchor all parts)
+-- Cleanup on script unload
 local function onUnload()
--- Re‑enable attachments
-for _, list in pairs(disabledAttachments) do
-for _, inst in ipairs(list) do
-if inst.Parent then pcall(function() inst.Enabled = true end) end
-end
-end
-table.clear(disabledAttachments)
--- Unanchor parts
-for _, list in pairs(anchoredParts) do
-for _, part in ipairs(list) do
-if part.Parent then pcall(function() part.Anchored = false end) end
-end
-end
-table.clear(anchoredParts)
--- Restore torso sizes
-for targetName, size in pairs(originalTorsoSize) do
-local targetPlayer = Players:FindFirstChild(targetName)
-if targetPlayer and targetPlayer.Character then
-local t = findTorso(targetPlayer.Character)
-if t then pcall(function() t.Size = size end) end
-end
-end
-table.clear(originalTorsoSize)
 for _, loop in ipairs(getgenv().ML_Expert_Loops or {}) do
 if type(loop) == "thread" then
 pcall(task.cancel, loop)
