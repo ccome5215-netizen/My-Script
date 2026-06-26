@@ -1,6 +1,4 @@
--- Muscle Legends Expert Hub (Refactored v2.1)
--- Single right‑hand killer | Anchor without attachments | Persistent CHANGED/NEW pet tracking
--- ==================== SAFE CLEANUP ====================
+-- MuscLe Legends Hub
 local oldUI = getgenv().ML_Expert_UI
 local oldLoops = getgenv().ML_Expert_Loops
 getgenv().ML_Expert_UI = nil
@@ -14,7 +12,6 @@ if oldLoops then
     end
 end
 
--- ==================== SERVICES & CORE ====================
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
@@ -27,7 +24,6 @@ local Stats = game:GetService("Stats")
 local player = Players.LocalPlayer
 local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 
--- ==================== CONFIG & STATE ====================
 local Config = { SizeValue = "1", RebirthTarget = "0", WalkSpeed = "16", FlySpeed = "50" }
 local function SaveConfig() pcall(function() writefile("ML_Expert_Config.json", HttpService:JSONEncode(Config)) end) end
 pcall(function()
@@ -79,7 +75,6 @@ local lastStatValues = {}
 local statGains = {}
 local statGainTimes = {}
 
--- ==================== DATA TABLES ====================
 local rockData = {
     ["Tiny Rock"] = {req = 0, name = "Tiny Rock", idx = 1, glitchValue = 0.025},
     ["Punching Rock"] = {req = 10, name = "Punching Rock", idx = 1, glitchValue = 0.05},
@@ -112,7 +107,6 @@ local treadmillData = {
     ["Legend Treadmill"] = { exp = 7, pos = Vector3.new(4368.8, 1003.6, -3639.2) }, ["Jungle Treadmill"] = { exp = 8, pos = Vector3.new(-8132.0, 32.2, 2815.3) }
 }
 
--- ==================== UTILITIES ====================
 local function getRockInstance(name)
     local data = rockData[name]
     if not data then return nil end
@@ -213,7 +207,6 @@ end
 
 local function getStrength() return player.leaderstats and player.leaderstats:FindFirstChild("Strength") and player.leaderstats.Strength.Value or 0 end
 
--- ==================== AUTO GYM & TREADMILL ====================
 local function findBestSeat(nearPos)
     local folder = workspace:FindFirstChild("machinesFolder")
     if not folder then return nil end
@@ -279,7 +272,6 @@ local function startAutoTreadmill()
     end)
 end
 
--- ==================== AUTO CRYSTAL ====================
 local function fireBuyCrystal(data) if data then pcall(function() ReplicatedStorage.cPetShopRemote:InvokeServer(data.folderChild) end) end end
 local function stopAutoPetBuy() if State.autoPetBuyThread then pcall(task.cancel, State.autoPetBuyThread); State.autoPetBuyThread = nil end; State.autoPetBuy = false end
 local function startAutoPetBuy()
@@ -305,7 +297,6 @@ local function startAutoAuraBuy()
     end)
 end
 
--- ==================== LEADERBOARD ====================
 local function checkAllPlayersStrength()
     local data = {}
     for _, plr in ipairs(Players:GetPlayers()) do
@@ -322,7 +313,6 @@ local function checkAllPlayersStrength()
     return data
 end
 
--- ==================== KILLER UTILITIES ====================
 local function getPlayerDisplayString(p) return p.DisplayName == p.Name and p.Name or p.DisplayName .. " (" .. p.Name .. ")" end
 local function getUsernameFromDisplay(display)
     local startParen = display:find(" %(")
@@ -330,7 +320,6 @@ local function getUsernameFromDisplay(display)
 end
 local function isWhitelisted(username) return KillerState.manualWhitelist[username] or KillerState.autoWhitelist[username] end
 
--- ==================== UI FRAMEWORK ====================
 local ScreenGui = Instance.new("ScreenGui", player.PlayerGui)
 ScreenGui.Name = "MuscleLegendsHub"; ScreenGui.ResetOnSpawn = false
 getgenv().ML_Expert_UI = ScreenGui
@@ -344,7 +333,7 @@ local TitleBar = Instance.new("Frame", MainFrame)
 TitleBar.Size = UDim2.new(1, 0, 0, 30); TitleBar.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 local TitleText = Instance.new("TextLabel", TitleBar)
 TitleText.Size = UDim2.new(1, -10, 1, 0); TitleText.Position = UDim2.fromOffset(5, 0)
-TitleText.BackgroundTransparency = 1; TitleText.Text = "Muscle Legends Expert"
+TitleText.BackgroundTransparency = 1; TitleText.Text = "Muscle Legends"
 TitleText.TextColor3 = Color3.new(1, 1, 1); TitleText.TextXAlignment = Enum.TextXAlignment.Left
 
 if isMobile then
@@ -404,7 +393,6 @@ for i, tName in ipairs(tabs) do
     btn.MouseButton1Click:Connect(function() for _, other in pairs(frames) do other.Visible = false end; f.Visible = true end)
 end
 
--- UI Components
 local SetToggle = {}
 local ui = { toggleButtons = {}, dropdownSetters = {}, dropdownHeaderSetters = {} }
 
@@ -492,7 +480,6 @@ local function createDropdown(parent, text, options, multi, callback, checkState
     return { refresh = refresh, setHeaderText = function(txt) headerText.Text = txt end, setValue = function(val) if not multi then headerText.Text = tostring(val) .. " v"; callback(val) end end }
 end
 
--- ==================== TAB 1: AUTO FARM ====================
 local f1 = frames["Auto Farm"]
 ui.selectRockDD = createDropdown(f1, "Select Rock", {"Tiny Rock", "Punching Rock", "Large Rock", "Golden Rock", "Frozen Rock", "Mystic Rock", "Inferno Rock", "Legend Rock", "Muscle King Rock", "Jungle Rock"}, false, function(v)
     if State.autoGlitch then handleGlitchCleanup(State.selectedMethod, function() State.selectedRock = v end) else State.selectedRock = v end
@@ -598,7 +585,6 @@ createToggle(f1, "Accelerate Rep Speed", "accelReps", function(val)
 end)
 createToggle(f1, "Fast Punch", "fastPunch", function(val) State.fastPunch = val; local p = getPunch(); if p and p:FindFirstChild("attackTime") then p.attackTime.Value = val and 0 or 0.35 end end)
 
--- ==================== TAB 2: FARM ====================
 local f2 = frames["Farm"]
 createToggle(f2, "Less Lag", "lessLag", function(val) State.lessLag = val end)
 local sizeBox = Instance.new("TextBox", f2)
@@ -681,7 +667,6 @@ openAllChestsBtn.MouseButton1Click:Connect(function()
     for _, chestName in ipairs(chests) do pcall(function() ReplicatedStorage.rEvents.checkChestRemote:InvokeServer(chestName) end); task.wait(0.3) end
 end)
 
--- ==================== TAB 3: STATS & INVENTORY (FIXED TRACKING) ====================
 local f3 = frames["Stats"]
 local statsPlayerDD
 local basicDD, advDD, rareDD, epicDD, uniqueDD
@@ -689,10 +674,6 @@ local auraBasicDD, auraAdvDD, auraRareDD, auraEpicDD, auraUniqueDD
 local petDetails, auraDetails
 local petRefsBasic, petRefsAdv, petRefsRare, petRefsEpic, petRefsUnique = {}, {}, {}, {}, {}
 local auraRefsBasic, auraRefsAdv, auraRefsRare, auraRefsEpic, auraRefsUnique = {}, {}, {}, {}, {}
-
--- PERSISTENT INVENTORY CACHE (Fixes the fake NEW bug + CHANGED detection)
-local PlayerInventoryCache = {}
-local PlayerInventoryChanged = {} -- [playerName][item] = true if changed
 
 local function getPetAuraState(item)
     local state = {}
@@ -776,7 +757,6 @@ local function refreshPetDropdown(folder, dropdownObj, refStore, playerName)
     
     initializePlayerInventory(playerName)
     local cache = PlayerInventoryCache[playerName]
-    local changed = PlayerInventoryChanged[playerName] or {}
     local counts, options, itemRefs = {}, {}, {}
     
     for _, item in ipairs(folder:GetChildren()) do
@@ -786,11 +766,8 @@ local function refreshPetDropdown(folder, dropdownObj, refStore, playerName)
         local finalName = cleanName
         
         if not cache[item] then
-            finalName = finalName .. " *NEW*"
             cache[item] = getPetAuraState(item)
             setupItemTracking(item, playerName)
-        elseif changed[item] then
-            finalName = finalName .. " *CHANGED*"
         end
         
         table.insert(options, finalName)
@@ -825,16 +802,9 @@ end
 
 local function handleItemSelection(label, refTable, detailLabel)
     if not label or label == "Nothing Here" then return end
-    -- Strip marks
-    local clean = label:gsub(" %*NEW%*", ""):gsub(" %*CHANGED%*", "")
-    local item = refTable[clean] or refTable[label]
+    local clean = label
+    local item = refTable[clean]
     if item then
-        -- Clear CHANGED mark for this item (optional)
-        local playerName = State.statsTarget
-        if playerName and PlayerInventoryChanged[playerName] then
-            PlayerInventoryChanged[playerName][item] = nil
-            refreshPetDropdownsForPlayer(playerName) -- update dropdown to remove mark
-        end
         local newState = getPetAuraState(item)
         local txt = "Evolved: " .. tostring(newState.evolved) .. "\nXP: " .. formatNum(newState.exp) .. "\nLevel: " .. formatNum(newState.level) .. "\nRequires Rebirth: " .. formatNum(newState.reqReb) .. "\nPerks:\n"
         for _, pName in ipairs({"strength", "durability", "agility", "damage"}) do
@@ -911,7 +881,6 @@ local ultList = Instance.new("TextLabel", f3); ultList.Size = UDim2.new(1, -10, 
 local gpHeader = Instance.new("TextLabel", f3); gpHeader.Size = UDim2.new(1, -10, 0, 20); gpHeader.Text = "--- GAMEPASSES ---"; gpHeader.BackgroundTransparency = 1; gpHeader.TextColor3 = Color3.fromRGB(0, 200, 100); gpHeader.Font = Enum.Font.SourceSansBold; gpHeader.TextXAlignment = Enum.TextXAlignment.Left
 local gpList = Instance.new("TextLabel", f3); gpList.Size = UDim2.new(1, -10, 0, 200); gpList.BackgroundTransparency = 1; gpList.TextColor3 = Color3.new(1, 1, 1); gpList.TextXAlignment = Enum.TextXAlignment.Left; gpList.TextYAlignment = Enum.TextYAlignment.Top; gpList.Text = "None"; gpList.TextWrapped = true; gpList.AutomaticSize = Enum.AutomaticSize.Y
 
--- ==================== TAB 4: AUTO GYM ====================
 local f4 = frames["Auto Gym"]
 local mapDD, gymDD
 mapDD = createDropdown(f4, "Select Map", {"Tiny Island", "Beach", "Legend Beach", "Frozen Island", "Mystic Island", "Inferno Island", "Legend Island", "Muscle King Island", "Jungle Island"}, false, function(map)
@@ -940,7 +909,6 @@ gymBtn.MouseButton1Click:Connect(function()
 end)
 ui.autoGymBtn = createToggle(f4, "Auto Gym", "autoGym", function(val) if val then if not State.selectedMap or not State.selectedGym then return false end; startAutoGym() else stopAutoGym() end; return val end)
 
--- ==================== TAB 5: AUTO TREADMILL ====================
 local f5 = frames["Auto Treadmill"]
 local treadmillOptions = {}
 for _, name in ipairs({"Tiny Treadmill","Small Treadmill","Medium Treadmill","Large Treadmill","Big Treadmill","Mystic Treadmill","Legend Treadmill","Jungle Treadmill"}) do
@@ -951,7 +919,6 @@ ui.treadmillDD = createDropdown(f5, "Select Treadmill", treadmillOptions, false,
 end)
 ui.autoTreadmillBtn = createToggle(f5, "Auto Treadmill", "autoTreadmill", function(val) if val then if not State.selectedTreadmill then return false end; startAutoTreadmill() else stopAutoTreadmill() end; return val end)
 
--- ==================== TAB 6: AUTO CRYSTAL ====================
 local f6 = frames["Auto Crystal"]
 local petList, auraList = {}, {}
 local function scanCrystalShop()
@@ -1006,7 +973,6 @@ end
 createCrystalSection(f6, "--- PETS ---", petList, "selectedPetCrystalData", "selectedPetCrystal", startAutoPetBuy, stopAutoPetBuy)
 createCrystalSection(f6, "--- AURAS ---", auraList, "selectedAuraCrystalData", "selectedAuraCrystal", startAutoAuraBuy, stopAutoAuraBuy)
 
--- ==================== TAB 7: GLITCHABLE REBIRTH ====================
 local f7 = frames["Glitchable Rebirth"]
 local glitchRockOptions = {}
 for _, rockName in ipairs({"Tiny Rock", "Punching Rock", "Large Rock", "Golden Rock", "Frozen Rock", "Mystic Rock", "Inferno Rock", "Legend Rock", "Muscle King Rock", "Jungle Rock"}) do
@@ -1051,7 +1017,6 @@ calcPetExpBtn.MouseButton1Click:Connect(function()
 end)
 local petExpCalcLabel = Instance.new("TextLabel", f7); petExpCalcLabel.Size = UDim2.new(1, -10, 0, 25); petExpCalcLabel.BackgroundTransparency = 1; petExpCalcLabel.Text = "Result: N/A"; petExpCalcLabel.TextColor3 = Color3.new(1, 1, 1); petExpCalcLabel.Font = Enum.Font.Gotham; petExpCalcLabel.TextSize = 12; _G.GlitchPetExpCalcLabel = petExpCalcLabel
 
--- ==================== TAB 8: CALCULATOR ====================
 local f8 = frames["Calculator"]
 local calcInput = Instance.new("TextBox", f8); calcInput.Size = UDim2.new(1, -10, 0, 35); calcInput.PlaceholderText = "Expression (e.g. 2*2 or (20+20)*12.5)"; calcInput.BackgroundColor3 = Color3.fromRGB(40, 40, 40); calcInput.TextColor3 = Color3.new(1, 1, 1); calcInput.Font = Enum.Font.Gotham; calcInput.TextSize = 14; calcInput.ClearTextOnFocus = false
 local calcResultLabel = Instance.new("TextLabel", f8); calcResultLabel.Size = UDim2.new(1, -10, 0, 30); calcResultLabel.BackgroundTransparency = 1; calcResultLabel.Text = "Result: "; calcResultLabel.TextColor3 = Color3.new(1, 1, 1); calcResultLabel.Font = Enum.Font.GothamBold; calcResultLabel.TextSize = 16
@@ -1067,7 +1032,6 @@ end)
 local clearCalcBtn = Instance.new("TextButton", f8); clearCalcBtn.Size = UDim2.new(1, -10, 0, 35); clearCalcBtn.BackgroundColor3 = Color3.fromRGB(90, 40, 40); clearCalcBtn.Text = "Clear Text"; clearCalcBtn.TextColor3 = Color3.new(1, 1, 1)
 clearCalcBtn.MouseButton1Click:Connect(function() calcInput.Text = ""; calcResultLabel.Text = "Result: " end)
 
--- ==================== TAB 9: TELEPORT ====================
 local f9 = frames["Teleport"]
 local teleportList = {
     {name = "Safe Spot", pos = Vector3.new(218.5, 41.1, -8129.3)}, {name = "Tiny Island", pos = Vector3.new(-33.6, 7.4, 1892.8)},
@@ -1081,7 +1045,6 @@ for _, tpData in ipairs(teleportList) do
     btn.MouseButton1Click:Connect(function() local char = player.Character; if char and char:FindFirstChild("HumanoidRootPart") then char.HumanoidRootPart.CFrame = CFrame.new(tpData.pos) end end)
 end
 
--- ==================== TAB 10: LEADERBOARD ====================
 local f_leaderboard = frames["Leaderboard"]
 local leaderboardTitle = Instance.new("TextLabel", f_leaderboard); leaderboardTitle.Size = UDim2.new(1, -10, 0, 25); leaderboardTitle.BackgroundTransparency = 1; leaderboardTitle.Text = "--- LEADERBOARD ---"; leaderboardTitle.TextColor3 = Color3.fromRGB(255, 215, 0); leaderboardTitle.Font = Enum.Font.GothamBold; leaderboardTitle.TextSize = 16; leaderboardTitle.TextXAlignment = Enum.TextXAlignment.Center
 local checkStrengthBtn = Instance.new("TextButton", f_leaderboard); checkStrengthBtn.Size = UDim2.new(1, -10, 0, 40); checkStrengthBtn.BackgroundColor3 = Color3.fromRGB(60, 100, 60); checkStrengthBtn.Text = "Check All Players Strength"; checkStrengthBtn.TextColor3 = Color3.new(1, 1, 1); checkStrengthBtn.Font = Enum.Font.GothamBold; checkStrengthBtn.TextSize = 14
@@ -1113,7 +1076,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do task.wait(10); if State.stopEverything then continue end; if frames["Leaderboard"].Visible and #State.leaderboardData > 0 then checkAllPlayersStrength(); updateLeaderboardDisplay() end end
 end))
 
--- ==================== TAB 11: CONFIG ====================
 local f10 = frames["Config"]
 local configFilePath = "ML_Expert_Configs.json"
 local savedConfigs = {}
@@ -1193,7 +1155,6 @@ removeConfigBtn.MouseButton1Click:Connect(function()
     end)
 end)
 
--- ==================== TAB 12: KILLER ====================
 local f_killer = frames["Killer"]
 local function refreshKillerDropdowns()
     local playerOptions = {}; local hasOthers = false
@@ -1260,8 +1221,7 @@ end)
 ui.autoGoodKarmaToggle = createToggle(f_killer, "Auto Good Karma", "autoGoodKarma", function(val) KillerState.autoGoodKarmaEnabled = val; if not val then for name in pairs(killSources.goodKarma) do killSources.goodKarma[name] = nil end end; return val end)
 ui.autoEvilKarmaToggle = createToggle(f_killer, "Auto Evil Karma", "autoEvilKarma", function(val) KillerState.autoEvilKarmaEnabled = val; if not val then for name in pairs(killSources.evilKarma) do killSources.evilKarma[name] = nil end end; return val end)
 
--- ==================== KILLER LOOPS (RIGHT HAND ONLY, ANCHOR BEFORE TELEPORT) ====================
-local anchoredParts = {} -- [username] = {part, part, ...}
+local killerAnchoredParts = {}
 
 local function getEffectiveTargetSet()
     local effective = {}
@@ -1273,9 +1233,7 @@ local function getEffectiveTargetSet()
     return effective
 end
 
--- Attack loop: process one target per iteration, right hand only
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
-    local currentTarget = nil
     while true do
         task.wait(0.05)
         if State.stopEverything then continue end
@@ -1285,15 +1243,13 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         local anyKillActive = KillerState.killSelectedEnabled or KillerState.killEveryoneEnabled
             or KillerState.autoGoodKarmaEnabled or KillerState.autoEvilKarmaEnabled
         
-        -- Cleanup when kill is off or punch not held
         if not hasPunch or not anyKillActive then
-            for _, parts in pairs(anchoredParts) do
+            for _, parts in pairs(killerAnchoredParts) do
                 for _, part in ipairs(parts) do
                     if part and part.Parent then pcall(function() part.Anchored = false end) end
                 end
             end
-            table.clear(anchoredParts)
-            currentTarget = nil
+            table.clear(killerAnchoredParts)
             continue
         end
         
@@ -1302,55 +1258,42 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
         local rightHand = myChar:FindFirstChild("RightHand") or myChar:FindFirstChild("Right Arm")
         if not rightHand then continue end
         
-        -- Validate current target
-        if currentTarget then
-            local p = Players:FindFirstChild(currentTarget)
-            if not p or not p.Character or not p.Character:FindFirstChild("HumanoidRootPart") then
-                currentTarget = nil
+        local effective = getEffectiveTargetSet()
+        
+        for name, parts in pairs(killerAnchoredParts) do
+            if not effective[name] then
+                for _, part in ipairs(parts) do
+                    if part and part.Parent then pcall(function() part.Anchored = false end) end
+                end
+                killerAnchoredParts[name] = nil
             end
         end
         
-        -- Acquire a new target if needed
-        if not currentTarget then
-            local effective = getEffectiveTargetSet()
-            for name in pairs(effective) do
-                currentTarget = name
-                break
-            end
-        end
-        
-        if not currentTarget then continue end
-        
-        local targetPlayer = Players:FindFirstChild(currentTarget)
-        if not targetPlayer or not targetPlayer.Character then continue end
-        local char = targetPlayer.Character
-        local torso = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
-        if not torso then
-            -- no torso, clear and try next iteration
-            currentTarget = nil
-            continue
-        end
-        
-        -- Anchor all parts except torso (if not already anchored)
-        if not anchoredParts[currentTarget] then
-            anchoredParts[currentTarget] = {}
-            for _, part in ipairs(char:GetDescendants()) do
-                if part:IsA("BasePart") and part ~= torso then
-                    if not part.Anchored then
-                        part.Anchored = true
-                        table.insert(anchoredParts[currentTarget], part)
+        for targetName in pairs(effective) do
+            local targetPlayer = Players:FindFirstChild(targetName)
+            if not targetPlayer or not targetPlayer.Character then continue end
+            local char = targetPlayer.Character
+            local torso = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
+            if not torso then continue end
+            
+            if not killerAnchoredParts[targetName] then
+                killerAnchoredParts[targetName] = {}
+                for _, part in ipairs(char:GetDescendants()) do
+                    if part:IsA("BasePart") and part ~= torso then
+                        if not part.Anchored then
+                            part.Anchored = true
+                            table.insert(killerAnchoredParts[targetName], part)
+                        end
                     end
                 end
             end
+            
+            torso.CFrame = rightHand.CFrame
+            pcall(function() player.muscleEvent:FireServer("punch", "rightHand") end)
         end
-        
-        -- Teleport torso to my right hand and punch
-        torso.CFrame = rightHand.CFrame
-        pcall(function() player.muscleEvent:FireServer("punch", "rightHand") end)
     end
 end))
 
--- Karma check loop (unchanged)
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         task.wait(1)
@@ -1377,7 +1320,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- ==================== PLAYER JOIN/LEAVE HANDLERS ====================
 Players.PlayerAdded:Connect(function(p)
     if p == player then return end
     refreshKillerDropdowns()
@@ -1391,12 +1333,11 @@ Players.PlayerRemoving:Connect(function(p)
     local name = p.Name
     KillerState.selectedPlayers[name], KillerState.manualWhitelist[name], KillerState.autoWhitelist[name] = nil, nil, nil
     killSources.selected[name], killSources.everyone[name], killSources.goodKarma[name], killSources.evilKarma[name] = nil, nil, nil, nil
-    -- Unanchor any parts left for this player
-    if anchoredParts[name] then
-        for _, part in ipairs(anchoredParts[name]) do
+    if killerAnchoredParts[name] then
+        for _, part in ipairs(killerAnchoredParts[name]) do
             if part and part.Parent then pcall(function() part.Anchored = false end) end
         end
-        anchoredParts[name] = nil
+        killerAnchoredParts[name] = nil
     end
     if PlayerInventoryCache[name] then PlayerInventoryCache[name] = nil end
     if PlayerInventoryChanged[name] then PlayerInventoryChanged[name] = nil end
@@ -1404,7 +1345,6 @@ Players.PlayerRemoving:Connect(function(p)
 end)
 refreshKillerDropdowns()
 
--- ==================== MAIN LOOPS ====================
 table.insert(getgenv().ML_Expert_Loops, RunService.Heartbeat:Connect(function()
     if State.stopEverything then return end
     if State.autoMuscleKing and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
@@ -1583,7 +1523,6 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     end
 end))
 
--- ==================== OTHER LOOPS ====================
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         if State.lessLag then task.wait(0.1) else RunService.Heartbeat:Wait() end
@@ -1710,10 +1649,8 @@ end))
 
 SetToggle[ui.walkOnWaterBtn](true)
 
--- Cleanup on script unload
 local function onUnload()
-    -- Unanchor any remaining anchored parts
-    for _, parts in pairs(anchoredParts) do
+    for _, parts in pairs(killerAnchoredParts) do
         for _, part in ipairs(parts) do
             if part and part.Parent then pcall(function() part.Anchored = false end) end
         end
