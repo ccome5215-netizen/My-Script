@@ -75,6 +75,87 @@ local lastStatValues = {}
 local statGains = {}
 local statGainTimes = {}
 
+-- Theme settings
+local ThemeSettings = {
+    MainBg = Color3.fromRGB(25, 25, 25),
+    TitleBg = Color3.fromRGB(40, 40, 40),
+    LeftPanelBg = Color3.fromRGB(30, 30, 30),
+    ButtonBg = Color3.fromRGB(45, 45, 45),
+    ButtonOnBg = Color3.fromRGB(0, 120, 0),
+    TextColor = Color3.new(1, 1, 1),
+    AccentColor = Color3.fromRGB(0, 120, 0),
+    CornerRadius = 0,
+    RainbowEnabled = false,
+    Preset = "Default"
+}
+local themeFilePath = "ML_Theme.json"
+local function SaveTheme() pcall(function() writefile(themeFilePath, HttpService:JSONEncode(ThemeSettings)) end) end
+local function LoadTheme()
+    pcall(function()
+        if isfile(themeFilePath) then
+            local data = HttpService:JSONDecode(readfile(themeFilePath))
+            for k, v in pairs(data) do if ThemeSettings[k] ~= nil then ThemeSettings[k] = v end end
+        end
+    end)
+end
+LoadTheme()
+
+local function applyTheme()
+    local function applyToAll()
+        for _, obj in ipairs(ScreenGui:GetDescendants()) do
+            if obj:IsA("Frame") and obj ~= MainFrame and obj ~= TitleBar and obj ~= LeftPanel then
+                if obj:FindFirstChild("UIGradient") then continue end
+                obj.BackgroundColor3 = ThemeSettings.MainBg
+            elseif obj:IsA("TextLabel") then
+                obj.TextColor3 = ThemeSettings.TextColor
+            elseif obj:IsA("TextButton") then
+                obj.BackgroundColor3 = ThemeSettings.ButtonBg
+                obj.TextColor3 = ThemeSettings.TextColor
+            end
+            if obj:IsA("UICorner") then
+                obj.CornerRadius = UDim.new(0, ThemeSettings.CornerRadius)
+            end
+        end
+        MainFrame.BackgroundColor3 = ThemeSettings.MainBg
+        TitleBar.BackgroundColor3 = ThemeSettings.TitleBg
+        LeftPanel.BackgroundColor3 = ThemeSettings.LeftPanelBg
+        -- toggle buttons
+        for _, btn in pairs(ui.toggleButtons) do
+            if btn and SetToggle[btn] then
+                local currentState = btn.Text:match("%[ON%]") ~= nil
+                btn.BackgroundColor3 = currentState and ThemeSettings.ButtonOnBg or ThemeSettings.ButtonBg
+            end
+        end
+    end
+    applyToAll()
+    SaveTheme()
+end
+
+-- Rainbow loop
+local rainbowLoop
+local function updateRainbow()
+    if ThemeSettings.RainbowEnabled then
+        if rainbowLoop then task.cancel(rainbowLoop) end
+        rainbowLoop = task.spawn(function()
+            local hue = 0
+            while ThemeSettings.RainbowEnabled and task.wait(0.05) do
+                hue = (hue + 0.01) % 1
+                local color = Color3.fromHSV(hue, 0.8, 0.9)
+                ThemeSettings.MainBg = Color3.fromHSV(hue, 0.6, 0.2)
+                ThemeSettings.TitleBg = Color3.fromHSV(hue, 0.7, 0.25)
+                ThemeSettings.LeftPanelBg = Color3.fromHSV(hue, 0.5, 0.18)
+                ThemeSettings.ButtonBg = Color3.fromHSV(hue, 0.7, 0.3)
+                ThemeSettings.ButtonOnBg = Color3.fromHSV(hue, 0.9, 0.6)
+                ThemeSettings.TextColor = Color3.new(1, 1, 1)
+                ThemeSettings.AccentColor = color
+                applyTheme()
+            end
+        end)
+    else
+        if rainbowLoop then task.cancel(rainbowLoop); rainbowLoop = nil end
+    end
+end
+
 local rockData = {
     ["Tiny Rock"] = {req = 0, name = "Tiny Rock", idx = 1, glitchValue = 0.025},
     ["Punching Rock"] = {req = 10, name = "Punching Rock", idx = 1, glitchValue = 0.05},
@@ -376,7 +457,7 @@ else
 end
 
 local frames = {}
-local tabs = {"Auto Farm", "Farm", "Stats", "Auto Gym", "Auto Treadmill", "Auto Crystal", "Glitchable Rebirth", "Calculator", "Teleport", "Leaderboard", "Config", "Killer"}
+local tabs = {"Auto Farm", "Farm", "Stats", "Auto Gym", "Auto Treadmill", "Auto Crystal", "Glitchable Rebirth", "Calculator", "Teleport", "Leaderboard", "Config", "Killer", "Custom Theme"}
 SidebarScroll.CanvasSize = isMobile and UDim2.new(0, #tabs * 75, 0, 0) or UDim2.new(0, 0, 0, #tabs * 32)
 
 for i, tName in ipairs(tabs) do
@@ -398,14 +479,14 @@ local ui = { toggleButtons = {}, dropdownSetters = {}, dropdownHeaderSetters = {
 
 local function createToggle(parent, text, key, callback)
     local btn = Instance.new("TextButton", parent)
-    btn.Size = UDim2.new(1, -10, 0, 30); btn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-    btn.Text = text .. " [OFF]"; btn.TextColor3 = Color3.new(1, 1, 1)
+    btn.Size = UDim2.new(1, -10, 0, 30); btn.BackgroundColor3 = ThemeSettings.ButtonBg
+    btn.Text = text .. " [OFF]"; btn.TextColor3 = ThemeSettings.TextColor
     local state = false
     if key then ui.toggleButtons[key] = btn end
     SetToggle[btn] = function(newState)
         state = newState
         btn.Text = text .. (state and " [ON]" or " [OFF]")
-        btn.BackgroundColor3 = state and Color3.fromRGB(0, 120, 0) or Color3.fromRGB(45, 45, 45)
+        btn.BackgroundColor3 = state and ThemeSettings.ButtonOnBg or ThemeSettings.ButtonBg
     end
     btn.MouseButton1Click:Connect(function()
         local newState = not state
@@ -418,68 +499,203 @@ end
 local function createConfirmPopup(message, onConfirm)
     local popup = Instance.new("Frame", ScreenGui)
     popup.Size = UDim2.fromOffset(280, 120); popup.Position = UDim2.new(0.5, -140, 0.5, -60)
-    popup.BackgroundColor3 = Color3.fromRGB(35, 35, 35); popup.ZIndex = 100
-    Instance.new("UICorner", popup).CornerRadius = UDim.new(0, 8)
+    popup.BackgroundColor3 = ThemeSettings.MainBg; popup.ZIndex = 100
+    Instance.new("UICorner", popup).CornerRadius = UDim.new(0, ThemeSettings.CornerRadius)
     local label = Instance.new("TextLabel", popup)
     label.Size = UDim2.new(1, -20, 0, 50); label.Position = UDim2.fromOffset(10, 10)
-    label.Text = message; label.TextColor3 = Color3.new(1, 1, 1); label.TextWrapped = true; label.BackgroundTransparency = 1; label.ZIndex = 101
+    label.Text = message; label.TextColor3 = ThemeSettings.TextColor; label.TextWrapped = true; label.BackgroundTransparency = 1; label.ZIndex = 101
     local yesBtn = Instance.new("TextButton", popup)
     yesBtn.Size = UDim2.fromOffset(120, 35); yesBtn.Position = UDim2.fromOffset(10, 70)
-    yesBtn.Text = "Yes"; yesBtn.BackgroundColor3 = Color3.fromRGB(0, 140, 0); yesBtn.TextColor3 = Color3.new(1, 1, 1); yesBtn.ZIndex = 101
+    yesBtn.Text = "Yes"; yesBtn.BackgroundColor3 = ThemeSettings.ButtonOnBg; yesBtn.TextColor3 = ThemeSettings.TextColor; yesBtn.ZIndex = 101
     yesBtn.MouseButton1Click:Connect(function() popup:Destroy(); onConfirm(true) end)
     local noBtn = Instance.new("TextButton", popup)
     noBtn.Size = UDim2.fromOffset(120, 35); noBtn.Position = UDim2.fromOffset(150, 70)
-    noBtn.Text = "No"; noBtn.BackgroundColor3 = Color3.fromRGB(140, 0, 0); noBtn.TextColor3 = Color3.new(1, 1, 1); noBtn.ZIndex = 101
+    noBtn.Text = "No"; noBtn.BackgroundColor3 = Color3.fromRGB(140, 0, 0); noBtn.TextColor3 = ThemeSettings.TextColor; noBtn.ZIndex = 101
     noBtn.MouseButton1Click:Connect(function() popup:Destroy(); onConfirm(false) end)
 end
 
-local function createDropdown(parent, text, options, multi, callback, checkStateFunc)
+local function createDropdown(parent, text, options, multi, callback, checkStateFunc, searchable)
     local container = Instance.new("Frame", parent)
     container.Size = UDim2.new(1, -10, 0, 30); container.BackgroundTransparency = 1
     local headerText = Instance.new("TextLabel", container)
-    headerText.Size = UDim2.new(1, 0, 0, 30); headerText.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-    headerText.Text = text .. " v"; headerText.TextColor3 = Color3.new(1, 1, 1); headerText.Active = true
+    headerText.Size = UDim2.new(1, 0, 0, 30); headerText.BackgroundColor3 = ThemeSettings.ButtonBg
+    headerText.Text = text .. " v"; headerText.TextColor3 = ThemeSettings.TextColor; headerText.Active = true
     local headerBtn = Instance.new("TextButton", container)
     headerBtn.Size = UDim2.new(1, 0, 0, 30); headerBtn.BackgroundTransparency = 1; headerBtn.ZIndex = 12
+
+    local searchBox
+    if searchable then
+        searchBox = Instance.new("TextBox", container)
+        searchBox.Size = UDim2.new(1, 0, 0, 20); searchBox.PlaceholderText = "Search..."; searchBox.ZIndex = 11
+        searchBox.BackgroundColor3 = ThemeSettings.MainBg; searchBox.TextColor3 = ThemeSettings.TextColor
+        searchBox.Position = UDim2.fromOffset(0, 30)
+    end
+
     local list = Instance.new("ScrollingFrame", container)
-    list.Position = UDim2.fromOffset(0, 30); list.Visible = false; list.ZIndex = 10
-    list.BackgroundColor3 = Color3.fromRGB(40, 40, 40); list.ScrollBarThickness = isMobile and 6 or 4; list.ClipsDescendants = true
-    
-    headerBtn.MouseButton1Click:Connect(function()
-        list.Visible = not list.Visible
-        local listHeight = math.min(#options * 25, 150)
-        container.Size = list.Visible and UDim2.new(1, -10, 0, listHeight + 30) or UDim2.new(1, -10, 0, 30)
-        list.Size = UDim2.new(1, 0, 0, listHeight); list.CanvasSize = UDim2.new(0, 0, 0, #options * 25)
-    end)
-    
-    local function refresh(newOpts)
-        if newOpts then options = newOpts end
-        for _, v in ipairs(list:GetChildren()) do v:Destroy() end
-        for i, opt in ipairs(options) do
+    list.ZIndex = 10
+    list.BackgroundColor3 = ThemeSettings.MainBg; list.ScrollBarThickness = isMobile and 6 or 4; list.ClipsDescendants = true
+    if searchable then
+        list.Position = UDim2.fromOffset(0, 50)
+    else
+        list.Position = UDim2.fromOffset(0, 30)
+    end
+    list.Visible = false
+
+    local allOptions = options
+    local currentOptions = options
+
+    local function rebuildList(filterText)
+        for _, v in ipairs(list:GetChildren()) do if v ~= searchBox then v:Destroy() end end
+        local filtered = {}
+        for _, opt in ipairs(allOptions) do
+            if not filterText or filterText == "" or opt:lower():find(filterText:lower(), 1, true) then
+                table.insert(filtered, opt)
+            end
+        end
+        currentOptions = filtered
+        for i, opt in ipairs(filtered) do
             local o = Instance.new("TextButton", list)
             o.Size = UDim2.new(1, 0, 0, 25); o.Position = UDim2.fromOffset(0, (i-1)*25)
-            o.Text = tostring(opt); o.TextColor3 = Color3.new(1, 1, 1); o.ZIndex = 11
+            o.Text = tostring(opt); o.TextColor3 = ThemeSettings.TextColor; o.ZIndex = 11
             if multi and checkStateFunc then
-                o.BackgroundColor3 = checkStateFunc(opt) and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(60, 60, 60)
-            else o.BackgroundColor3 = Color3.fromRGB(60, 60, 60) end
+                o.BackgroundColor3 = checkStateFunc(opt) and ThemeSettings.ButtonOnBg or ThemeSettings.ButtonBg
+            else
+                o.BackgroundColor3 = ThemeSettings.ButtonBg
+            end
             o.MouseButton1Click:Connect(function()
                 if not multi then
                     headerText.Text = tostring(opt) .. " v"; list.Visible = false
-                    container.Size = UDim2.new(1, -10, 0, 30); callback(opt)
+                    container.Size = UDim2.new(1, -10, 0, 30)
+                    if searchable then searchBox.Text = "" end
+                    callback(opt)
                 else
                     local newState = callback(opt)
-                    o.BackgroundColor3 = newState and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(60, 60, 60)
+                    o.BackgroundColor3 = newState and ThemeSettings.ButtonOnBg or ThemeSettings.ButtonBg
                 end
             end)
         end
-        local listHeight = math.min(#options * 25, 150)
-        if list.Visible then container.Size = UDim2.new(1, -10, 0, listHeight + 30); list.Size = UDim2.new(1, 0, 0, listHeight) end
-        list.CanvasSize = UDim2.new(0, 0, 0, #options * 25)
+        local listHeight = math.min(#filtered * 25, 150)
+        if list.Visible then container.Size = UDim2.new(1, -10, 0, (searchable and 50 or 30) + listHeight); list.Size = UDim2.new(1, 0, 0, listHeight) end
+        list.CanvasSize = UDim2.new(0, 0, 0, #filtered * 25)
     end
-    refresh()
+
+    if searchable then
+        searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+            rebuildList(searchBox.Text)
+        end)
+    end
+
+    headerBtn.MouseButton1Click:Connect(function()
+        list.Visible = not list.Visible
+        if list.Visible then
+            rebuildList(searchable and searchBox.Text or nil)
+        else
+            container.Size = UDim2.new(1, -10, 0, searchable and 50 or 30)
+        end
+    end)
+
+    local function refresh(newOpts)
+        if newOpts then allOptions = newOpts; currentOptions = newOpts end
+        rebuildList(searchable and searchBox and searchBox.Text or nil)
+    end
+
+    rebuildList()
     return { refresh = refresh, setHeaderText = function(txt) headerText.Text = txt end, setValue = function(val) if not multi then headerText.Text = tostring(val) .. " v"; callback(val) end end }
 end
 
+-- Custom Theme tab
+local f_theme = frames["Custom Theme"]
+do
+    local colorOptions = {"Red", "Green", "Blue", "White", "Purple", "Orange", "Pink", "Cyan", "Rainbow"}
+    local function setColorByName(name)
+        local colors = {
+            Red = Color3.fromRGB(200, 40, 40), Green = Color3.fromRGB(40, 200, 40), Blue = Color3.fromRGB(40, 40, 200),
+            White = Color3.new(1,1,1), Purple = Color3.fromRGB(130, 40, 200), Orange = Color3.fromRGB(200, 120, 40),
+            Pink = Color3.fromRGB(200, 40, 130), Cyan = Color3.fromRGB(40, 200, 200)
+        }
+        if name == "Rainbow" then
+            ThemeSettings.RainbowEnabled = true
+        else
+            ThemeSettings.RainbowEnabled = false
+            if colors[name] then
+                ThemeSettings.AccentColor = colors[name]
+                ThemeSettings.ButtonOnBg = colors[name]
+                ThemeSettings.MainBg = Color3.fromRGB(25, 25, 25)
+                ThemeSettings.TitleBg = Color3.fromRGB(40, 40, 40)
+                ThemeSettings.LeftPanelBg = Color3.fromRGB(30, 30, 30)
+                ThemeSettings.ButtonBg = Color3.fromRGB(45, 45, 45)
+                ThemeSettings.TextColor = Color3.new(1, 1, 1)
+            end
+        end
+        updateRainbow()
+        applyTheme()
+    end
+
+    createDropdown(f_theme, "Color", colorOptions, false, setColorByName, nil, false)
+
+    local presetOptions = {"Default", "Dark", "Light", "Neon", "Round", "Sharp"}
+    local function setPreset(name)
+        ThemeSettings.Preset = name
+        if name == "Default" then
+            ThemeSettings.MainBg = Color3.fromRGB(25,25,25); ThemeSettings.TitleBg = Color3.fromRGB(40,40,40); ThemeSettings.LeftPanelBg = Color3.fromRGB(30,30,30)
+            ThemeSettings.ButtonBg = Color3.fromRGB(45,45,45); ThemeSettings.ButtonOnBg = Color3.fromRGB(0,120,0); ThemeSettings.TextColor = Color3.new(1,1,1)
+            ThemeSettings.CornerRadius = 0; ThemeSettings.RainbowEnabled = false
+        elseif name == "Dark" then
+            ThemeSettings.MainBg = Color3.fromRGB(15,15,15); ThemeSettings.TitleBg = Color3.fromRGB(30,30,30); ThemeSettings.LeftPanelBg = Color3.fromRGB(20,20,20)
+            ThemeSettings.ButtonBg = Color3.fromRGB(35,35,35); ThemeSettings.ButtonOnBg = Color3.fromRGB(0,100,0); ThemeSettings.TextColor = Color3.new(0.9,0.9,0.9)
+            ThemeSettings.CornerRadius = 2; ThemeSettings.RainbowEnabled = false
+        elseif name == "Light" then
+            ThemeSettings.MainBg = Color3.fromRGB(240,240,240); ThemeSettings.TitleBg = Color3.fromRGB(220,220,220); ThemeSettings.LeftPanelBg = Color3.fromRGB(230,230,230)
+            ThemeSettings.ButtonBg = Color3.fromRGB(200,200,200); ThemeSettings.ButtonOnBg = Color3.fromRGB(100,200,100); ThemeSettings.TextColor = Color3.new(0,0,0)
+            ThemeSettings.CornerRadius = 0; ThemeSettings.RainbowEnabled = false
+        elseif name == "Neon" then
+            ThemeSettings.MainBg = Color3.fromRGB(20,20,30); ThemeSettings.TitleBg = Color3.fromRGB(40,40,70); ThemeSettings.LeftPanelBg = Color3.fromRGB(30,30,50)
+            ThemeSettings.ButtonBg = Color3.fromRGB(60,60,100); ThemeSettings.ButtonOnBg = Color3.fromRGB(0,255,200); ThemeSettings.TextColor = Color3.new(0,1,1)
+            ThemeSettings.CornerRadius = 8; ThemeSettings.RainbowEnabled = false
+        elseif name == "Round" then
+            ThemeSettings.CornerRadius = 10
+        elseif name == "Sharp" then
+            ThemeSettings.CornerRadius = 0
+        end
+        updateRainbow()
+        applyTheme()
+    end
+
+    createDropdown(f_theme, "Theme Preset", presetOptions, false, setPreset, nil, false)
+
+    local radiusBox = Instance.new("TextBox", f_theme)
+    radiusBox.Size = UDim2.new(1, -10, 0, 30); radiusBox.Text = tostring(ThemeSettings.CornerRadius)
+    radiusBox.PlaceholderText = "Corner Radius"; radiusBox.BackgroundColor3 = ThemeSettings.ButtonBg; radiusBox.TextColor3 = ThemeSettings.TextColor
+    radiusBox.FocusLost:Connect(function()
+        local num = tonumber(radiusBox.Text); if num then ThemeSettings.CornerRadius = math.clamp(num, 0, 20); applyTheme() end
+    end)
+
+    local applyBtn = Instance.new("TextButton", f_theme)
+    applyBtn.Size = UDim2.new(1, -10, 0, 35); applyBtn.Text = "Apply"; applyBtn.BackgroundColor3 = ThemeSettings.AccentColor; applyBtn.TextColor3 = ThemeSettings.TextColor
+    applyBtn.MouseButton1Click:Connect(function()
+        local num = tonumber(radiusBox.Text); if num then ThemeSettings.CornerRadius = math.clamp(num, 0, 20) end
+        applyTheme()
+        SaveTheme()
+    end)
+
+    local resetBtn = Instance.new("TextButton", f_theme)
+    resetBtn.Size = UDim2.new(1, -10, 0, 35); resetBtn.Text = "Reset to Default"; resetBtn.BackgroundColor3 = Color3.fromRGB(120, 40, 40); resetBtn.TextColor3 = ThemeSettings.TextColor
+    resetBtn.MouseButton1Click:Connect(function()
+        ThemeSettings = {
+            MainBg = Color3.fromRGB(25,25,25), TitleBg = Color3.fromRGB(40,40,40), LeftPanelBg = Color3.fromRGB(30,30,30),
+            ButtonBg = Color3.fromRGB(45,45,45), ButtonOnBg = Color3.fromRGB(0,120,0), TextColor = Color3.new(1,1,1),
+            AccentColor = Color3.fromRGB(0,120,0), CornerRadius = 0, RainbowEnabled = false, Preset = "Default"
+        }
+        radiusBox.Text = "0"
+        updateRainbow()
+        applyTheme()
+    end)
+end
+
+-- Apply theme after all UI is built
+applyTheme()
+
+-- TAB 1: AUTO FARM
 local f1 = frames["Auto Farm"]
 ui.selectRockDD = createDropdown(f1, "Select Rock", {"Tiny Rock", "Punching Rock", "Large Rock", "Golden Rock", "Frozen Rock", "Mystic Rock", "Inferno Rock", "Legend Rock", "Muscle King Rock", "Jungle Rock"}, false, function(v)
     if State.autoGlitch then handleGlitchCleanup(State.selectedMethod, function() State.selectedRock = v end) else State.selectedRock = v end
@@ -511,7 +727,7 @@ createToggle(f1, "Auto Glitch", "autoGlitch", function(val)
 end)
 
 local timerLabel = Instance.new("TextLabel", f1)
-timerLabel.Size = UDim2.new(1, -10, 0, 20); timerLabel.BackgroundTransparency = 1; timerLabel.TextColor3 = Color3.fromRGB(200, 200, 200); timerLabel.Text = "Glitch Timer: 00:00:00:00"
+timerLabel.Size = UDim2.new(1, -10, 0, 20); timerLabel.BackgroundTransparency = 1; timerLabel.TextColor3 = ThemeSettings.TextColor; timerLabel.Text = "Glitch Timer: 00:00:00:00"
 local pingFpsLabel = Instance.new("TextLabel", f1)
 pingFpsLabel.Size = UDim2.new(1, -10, 0, 25); pingFpsLabel.BackgroundTransparency = 1; pingFpsLabel.TextColor3 = Color3.fromRGB(100, 255, 100); pingFpsLabel.Font = Enum.Font.GothamBold; pingFpsLabel.TextSize = 12; pingFpsLabel.Text = "Ping: -- ms | FPS: --"
 
@@ -542,14 +758,14 @@ end)
 createToggle(f1, "Auto Equip Tool", "autoEquip", function(v) if v and (not State.selectedTool or State.selectedTool == "NO TOOL FOUND") then return false end; State.autoEquip = v; return v end)
 
 local rebBox = Instance.new("TextBox", f1)
-rebBox.Size = UDim2.new(1, -10, 0, 30); rebBox.Text = Config.RebirthTarget; rebBox.PlaceholderText = "Rebirth Target"; rebBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); rebBox.TextColor3 = Color3.new(1, 1, 1)
+rebBox.Size = UDim2.new(1, -10, 0, 30); rebBox.Text = Config.RebirthTarget; rebBox.PlaceholderText = "Rebirth Target"; rebBox.BackgroundColor3 = ThemeSettings.ButtonBg; rebBox.TextColor3 = ThemeSettings.TextColor
 rebBox.FocusLost:Connect(function() Config.RebirthTarget = rebBox.Text; SaveConfig() end)
 
 local function createRebirthConfirmToggle(parent, text, key, stateKey, otherStateKey, otherKey)
     local btn = Instance.new("TextButton", parent)
-    btn.Size = UDim2.new(1, -10, 0, 30); btn.BackgroundColor3 = Color3.fromRGB(45, 45, 45); btn.Text = text .. " [OFF]"; btn.TextColor3 = Color3.new(1, 1, 1)
+    btn.Size = UDim2.new(1, -10, 0, 30); btn.BackgroundColor3 = ThemeSettings.ButtonBg; btn.Text = text .. " [OFF]"; btn.TextColor3 = ThemeSettings.TextColor
     local state = false; if key then ui.toggleButtons[key] = btn end
-    local function updateVisual() btn.Text = text .. (state and " [ON]" or " [OFF]"); btn.BackgroundColor3 = state and Color3.fromRGB(0, 120, 0) or Color3.fromRGB(45, 45, 45) end
+    local function updateVisual() btn.Text = text .. (state and " [ON]" or " [OFF]"); btn.BackgroundColor3 = state and ThemeSettings.ButtonOnBg or ThemeSettings.ButtonBg end
     SetToggle[btn] = function(newState) state = newState; updateVisual() end
     btn.MouseButton1Click:Connect(function()
         if state then state = false; updateVisual(); State[stateKey] = false
@@ -585,21 +801,22 @@ createToggle(f1, "Accelerate Rep Speed", "accelReps", function(val)
 end)
 createToggle(f1, "Fast Punch", "fastPunch", function(val) State.fastPunch = val; local p = getPunch(); if p and p:FindFirstChild("attackTime") then p.attackTime.Value = val and 0 or 0.35 end end)
 
+-- TAB 2: FARM
 local f2 = frames["Farm"]
 createToggle(f2, "Less Lag", "lessLag", function(val) State.lessLag = val end)
 local sizeBox = Instance.new("TextBox", f2)
-sizeBox.Size = UDim2.new(1, -10, 0, 30); sizeBox.Text = Config.SizeValue; sizeBox.PlaceholderText = "Size Value"; sizeBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); sizeBox.TextColor3 = Color3.new(1, 1, 1)
+sizeBox.Size = UDim2.new(1, -10, 0, 30); sizeBox.Text = Config.SizeValue; sizeBox.PlaceholderText = "Size Value"; sizeBox.BackgroundColor3 = ThemeSettings.ButtonBg; sizeBox.TextColor3 = ThemeSettings.TextColor
 sizeBox.FocusLost:Connect(function() local num = tonumber(sizeBox.Text); if not num or num < 1 then sizeBox.Text = "1" elseif num > 100 then sizeBox.Text = "100" else sizeBox.Text = tostring(math.floor(num)) end; Config.SizeValue = sizeBox.Text; SaveConfig() end)
 createToggle(f2, "Auto Size Toggle", "autoSize", function(v) State.autoSize = v end)
 
 local wsBox = Instance.new("TextBox", f2)
-wsBox.Size = UDim2.new(1, -10, 0, 30); wsBox.Text = Config.WalkSpeed; wsBox.PlaceholderText = "WalkSpeed"; wsBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); wsBox.TextColor3 = Color3.new(1, 1, 1)
+wsBox.Size = UDim2.new(1, -10, 0, 30); wsBox.Text = Config.WalkSpeed; wsBox.PlaceholderText = "WalkSpeed"; wsBox.BackgroundColor3 = ThemeSettings.ButtonBg; wsBox.TextColor3 = ThemeSettings.TextColor
 wsBox:GetPropertyChangedSignal("Text"):Connect(function() wsBox.Text = wsBox.Text:gsub("%D", "") end)
 wsBox.FocusLost:Connect(function() local num = tonumber(wsBox.Text); if not num or num < 1 then wsBox.Text = "16" else wsBox.Text = tostring(math.floor(num)) end; Config.WalkSpeed = wsBox.Text; SaveConfig() end)
 createToggle(f2, "Auto WalkSpeed", "autoWalkSpeed", function(v) State.autoWalkSpeed = v end)
 
 local flySpeedBox = Instance.new("TextBox", f2)
-flySpeedBox.Size = UDim2.new(1, -10, 0, 30); flySpeedBox.Text = Config.FlySpeed; flySpeedBox.PlaceholderText = "Fly Speed"; flySpeedBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); flySpeedBox.TextColor3 = Color3.new(1, 1, 1)
+flySpeedBox.Size = UDim2.new(1, -10, 0, 30); flySpeedBox.Text = Config.FlySpeed; flySpeedBox.PlaceholderText = "Fly Speed"; flySpeedBox.BackgroundColor3 = ThemeSettings.ButtonBg; flySpeedBox.TextColor3 = ThemeSettings.TextColor
 flySpeedBox:GetPropertyChangedSignal("Text"):Connect(function() flySpeedBox.Text = flySpeedBox.Text:gsub("%D", "") end)
 flySpeedBox.FocusLost:Connect(function() Config.FlySpeed = flySpeedBox.Text; SaveConfig() end)
 
@@ -615,11 +832,11 @@ end)
 createToggle(f2, "God Mode", "godMode", function(v) State.godMode = v end)
 
 local copyPosBtn = Instance.new("TextButton", f2)
-copyPosBtn.Size = UDim2.new(1, -10, 0, 35); copyPosBtn.Text = "Copy My Position"; copyPosBtn.BackgroundColor3 = Color3.fromRGB(40, 60, 60); copyPosBtn.TextColor3 = Color3.new(1, 1, 1)
+copyPosBtn.Size = UDim2.new(1, -10, 0, 35); copyPosBtn.Text = "Copy My Position"; copyPosBtn.BackgroundColor3 = ThemeSettings.ButtonBg; copyPosBtn.TextColor3 = ThemeSettings.TextColor
 copyPosBtn.MouseButton1Click:Connect(function() if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then local pos = player.Character.HumanoidRootPart.Position; pcall(function() setclipboard(string.format("%f, %f, %f", pos.X, pos.Y, pos.Z)) end) end end)
 
 local snackBtn = Instance.new("TextButton", f2)
-snackBtn.Size = UDim2.new(1, -10, 0, 35); snackBtn.Text = "Eat All Snacks"; snackBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40); snackBtn.TextColor3 = Color3.new(1, 1, 1)
+snackBtn.Size = UDim2.new(1, -10, 0, 35); snackBtn.Text = "Eat All Snacks"; snackBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40); snackBtn.TextColor3 = ThemeSettings.TextColor
 snackBtn.MouseButton1Click:Connect(function()
     createConfirmPopup("Are you sure you want to eat ALL snacks?", function(confirmed)
         if confirmed then
@@ -655,18 +872,19 @@ ui.walkOnWaterBtn = createToggle(f2, "Walk on Water", "walkOnWater", function(va
 end)
 createToggle(f2, "UnEquip Boosts & Drinks", "autoUnequipBoosts", function(val) State.autoUnequipBoosts = val; return val end)
 
-local smallHopBtn = Instance.new("TextButton", f2); smallHopBtn.Size = UDim2.new(1, -10, 0, 35); smallHopBtn.Text = "Small Server Hop"; smallHopBtn.BackgroundColor3 = Color3.fromRGB(40, 60, 60); smallHopBtn.TextColor3 = Color3.new(1, 1, 1); smallHopBtn.MouseButton1Click:Connect(function() ServerHop("Small") end)
-local largeHopBtn = Instance.new("TextButton", f2); largeHopBtn.Size = UDim2.new(1, -10, 0, 35); largeHopBtn.Text = "Large Server Hop"; largeHopBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40); largeHopBtn.TextColor3 = Color3.new(1, 1, 1); largeHopBtn.MouseButton1Click:Connect(function() ServerHop("Large") end)
-local rejoinBtn = Instance.new("TextButton", f2); rejoinBtn.Size = UDim2.new(1, -10, 0, 35); rejoinBtn.Text = "Rejoin"; rejoinBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 60); rejoinBtn.TextColor3 = Color3.new(1, 1, 1)
+local smallHopBtn = Instance.new("TextButton", f2); smallHopBtn.Size = UDim2.new(1, -10, 0, 35); smallHopBtn.Text = "Small Server Hop"; smallHopBtn.BackgroundColor3 = Color3.fromRGB(40, 60, 60); smallHopBtn.TextColor3 = ThemeSettings.TextColor; smallHopBtn.MouseButton1Click:Connect(function() ServerHop("Small") end)
+local largeHopBtn = Instance.new("TextButton", f2); largeHopBtn.Size = UDim2.new(1, -10, 0, 35); largeHopBtn.Text = "Large Server Hop"; largeHopBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40); largeHopBtn.TextColor3 = ThemeSettings.TextColor; largeHopBtn.MouseButton1Click:Connect(function() ServerHop("Large") end)
+local rejoinBtn = Instance.new("TextButton", f2); rejoinBtn.Size = UDim2.new(1, -10, 0, 35); rejoinBtn.Text = "Rejoin"; rejoinBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 60); rejoinBtn.TextColor3 = ThemeSettings.TextColor
 rejoinBtn.MouseButton1Click:Connect(function() pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, player) end) end)
 
 local openAllChestsBtn = Instance.new("TextButton", f2)
-openAllChestsBtn.Size = UDim2.new(1, -10, 0, 35); openAllChestsBtn.Text = "Open All Chest"; openAllChestsBtn.BackgroundColor3 = Color3.fromRGB(60, 120, 60); openAllChestsBtn.TextColor3 = Color3.new(1, 1, 1)
+openAllChestsBtn.Size = UDim2.new(1, -10, 0, 35); openAllChestsBtn.Text = "Open All Chest"; openAllChestsBtn.BackgroundColor3 = Color3.fromRGB(60, 120, 60); openAllChestsBtn.TextColor3 = ThemeSettings.TextColor
 openAllChestsBtn.MouseButton1Click:Connect(function()
     local chests = {"Group Rewards", "Golden Chest", "Enchanted Chest", "Mythical Chest", "Magma Chest", "Legends Chest", "Jungle Chest"}
     for _, chestName in ipairs(chests) do pcall(function() ReplicatedStorage.rEvents.checkChestRemote:InvokeServer(chestName) end); task.wait(0.3) end
 end)
 
+-- TAB 3: STATS
 local f3 = frames["Stats"]
 local statsPlayerDD
 local basicDD, advDD, rareDD, epicDD, uniqueDD
@@ -675,6 +893,7 @@ local petDetails, auraDetails
 local petRefsBasic, petRefsAdv, petRefsRare, petRefsEpic, petRefsUnique = {}, {}, {}, {}, {}
 local auraRefsBasic, auraRefsAdv, auraRefsRare, auraRefsEpic, auraRefsUnique = {}, {}, {}, {}, {}
 
+local PlayerInventoryCache = {}; local PlayerInventoryChanged = {}
 local function getPetAuraState(item)
     local state = {}
     local evObj = item:FindFirstChild("Evolved") or item:FindFirstChild("evolved")
@@ -691,13 +910,11 @@ local function getPetAuraState(item)
     end
     return state
 end
-
 local function statesEqual(s1, s2)
     for k, v in pairs(s1) do if s2[k] ~= v then return false end end
     for k, v in pairs(s2) do if s1[k] ~= v then return false end end
     return true
 end
-
 local function setupItemTracking(item, playerName)
     local function checkChange()
         if not PlayerInventoryCache[playerName] or not PlayerInventoryCache[playerName][item] then return end
@@ -721,7 +938,6 @@ local function setupItemTracking(item, playerName)
         end
     end
 end
-
 local function initializePlayerInventory(playerName)
     if PlayerInventoryCache[playerName] then return end
     PlayerInventoryCache[playerName] = {}
@@ -747,38 +963,25 @@ local function initializePlayerInventory(playerName)
     local powerUpsF = targetPlayer:FindFirstChild("powerUpsFolder")
     if powerUpsF then for _, sub in ipairs(powerUpsF:GetChildren()) do scanFolder(sub) end end
 end
-
 local function refreshPetDropdown(folder, dropdownObj, refStore, playerName)
     if not folder or not playerName then
         dropdownObj.refresh({"Nothing Here"})
         if refStore then table.clear(refStore) end
         return
     end
-    
     initializePlayerInventory(playerName)
-    local cache = PlayerInventoryCache[playerName]
     local counts, options, itemRefs = {}, {}, {}
-    
     for _, item in ipairs(folder:GetChildren()) do
         local baseName = item.Name
         counts[baseName] = (counts[baseName] or 0) + 1
         local cleanName = baseName .. " #" .. counts[baseName]
-        local finalName = cleanName
-        
-        if not cache[item] then
-            cache[item] = getPetAuraState(item)
-            setupItemTracking(item, playerName)
-        end
-        
-        table.insert(options, finalName)
-        itemRefs[finalName] = item
+        table.insert(options, cleanName)
+        itemRefs[cleanName] = item
     end
-    
     if #options == 0 then options = {"Nothing Here"} end
     dropdownObj.refresh(options)
     if refStore then table.clear(refStore); for k, v in pairs(itemRefs) do refStore[k] = v end end
 end
-
 local function refreshPetDropdownsForPlayer(playerName)
     local tp = Players:FindFirstChild(playerName)
     if not tp or State.statsTarget ~= playerName then return end
@@ -799,11 +1002,9 @@ local function refreshPetDropdownsForPlayer(playerName)
         refreshPetDropdown(powerUpsF:FindFirstChild("Unique"), auraUniqueDD, auraRefsUnique, playerName)
     end
 end
-
 local function handleItemSelection(label, refTable, detailLabel)
     if not label or label == "Nothing Here" then return end
-    local clean = label
-    local item = refTable[clean]
+    local item = refTable[label]
     if item then
         local newState = getPetAuraState(item)
         local txt = "Evolved: " .. tostring(newState.evolved) .. "\nXP: " .. formatNum(newState.exp) .. "\nLevel: " .. formatNum(newState.level) .. "\nRequires Rebirth: " .. formatNum(newState.reqReb) .. "\nPerks:\n"
@@ -816,7 +1017,6 @@ local function handleItemSelection(label, refTable, detailLabel)
         detailLabel.Text = "Select a " .. (detailLabel == petDetails and "Pet" or "Aura") .. " to view stats"
     end
 end
-
 local function clearPetAuraUI()
     State.currentPetLabel, State.currentPetTable, State.currentAuraLabel, State.currentAuraTable = nil, nil, nil, nil
     if petDetails then petDetails.Text = "Select a Pet to view stats" end
@@ -825,7 +1025,6 @@ local function clearPetAuraUI()
     resetDD(basicDD, "Basic Pets"); resetDD(advDD, "Advance Pets"); resetDD(rareDD, "Rare Pets"); resetDD(epicDD, "Epic Pets"); resetDD(uniqueDD, "Unique Pets")
     resetDD(auraBasicDD, "Basic Auras"); resetDD(auraAdvDD, "Advance Auras"); resetDD(auraRareDD, "Rare Auras"); resetDD(auraEpicDD, "Epic Auras"); resetDD(auraUniqueDD, "Unique Auras")
 end
-
 local function resetStatsUI()
     State.trackStats = false; State.statsTarget = nil; lastStatValues = {}; statGains = {}; statGainTimes = {}
     if statsPlayerDD then statsPlayerDD.setHeaderText("Player Dropdown v") end
@@ -842,45 +1041,46 @@ statsPlayerDD = createDropdown(f3, "Player Dropdown", {}, false, function(label)
         clearPetAuraUI()
         refreshPetDropdownsForPlayer(newTarget)
     end
-end)
+end, nil, true) -- searchable
 Players.PlayerRemoving:Connect(function(plr) if State.statsTarget == plr.Name then resetStatsUI() end end)
 
 ui.trackToggle = createToggle(f3, "Track Stats", "trackStats", function(v) State.trackStats = v; if v and not State.statsTarget then return false end; return v end)
 createToggle(f3, "Without Format Number", "withoutFormatNum", function(v) State.withoutFormatNum = v end)
 
 local tpToPlayerBtn = Instance.new("TextButton", f3)
-tpToPlayerBtn.Size = UDim2.new(1, -10, 0, 30); tpToPlayerBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 60); tpToPlayerBtn.Text = "Teleport Player"; tpToPlayerBtn.TextColor3 = Color3.new(1, 1, 1)
+tpToPlayerBtn.Size = UDim2.new(1, -10, 0, 30); tpToPlayerBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 60); tpToPlayerBtn.Text = "Teleport Player"; tpToPlayerBtn.TextColor3 = ThemeSettings.TextColor
 tpToPlayerBtn.MouseButton1Click:Connect(function() if State.statsTarget then local tp = Players:FindFirstChild(State.statsTarget); if tp and tp.Character and tp.Character:FindFirstChild("HumanoidRootPart") and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then player.Character.HumanoidRootPart.CFrame = tp.Character.HumanoidRootPart.CFrame end end end)
 
 local statNamesList = {"Strength", "Durability", "Agility", "Rebirth", "Rebirth Multiplier", "Brawl", "Kill", "Gems", "Brawl Kill", "Size", "Speed", "Good Karma", "Evil Karma", "Auto Lift", "Muscle King Time", "Save Size", "Save Speed", "Current Map"}
 local statsDisp = {}
-for _, s in ipairs(statNamesList) do local l = Instance.new("TextLabel", f3); l.Size = UDim2.new(1, -10, 0, 20); l.Text = s .. ": None"; l.BackgroundTransparency = 1; l.TextColor3 = Color3.new(1, 1, 1); l.TextXAlignment = Enum.TextXAlignment.Left; statsDisp[s] = l end
+for _, s in ipairs(statNamesList) do local l = Instance.new("TextLabel", f3); l.Size = UDim2.new(1, -10, 0, 20); l.Text = s .. ": None"; l.BackgroundTransparency = 1; l.TextColor3 = ThemeSettings.TextColor; l.TextXAlignment = Enum.TextXAlignment.Left; statsDisp[s] = l end
 
 createToggle(f3, "View Player", "viewing", function(val) State.viewing = val; if not val and player.Character and player.Character:FindFirstChild("Humanoid") then workspace.CurrentCamera.CameraSubject = player.Character.Humanoid end end)
 
 local invHeader = Instance.new("TextLabel", f3); invHeader.Size = UDim2.new(1, -10, 0, 25); invHeader.Text = "--- PETS ---"; invHeader.BackgroundTransparency = 1; invHeader.TextColor3 = Color3.fromRGB(200, 200, 0); invHeader.Font = Enum.Font.SourceSansBold; invHeader.TextSize = 18
-petDetails = Instance.new("TextLabel", f3); petDetails.Size = UDim2.new(1, -10, 0, 140); petDetails.BackgroundTransparency = 1; petDetails.TextColor3 = Color3.new(1, 1, 1); petDetails.TextXAlignment = Enum.TextXAlignment.Left; petDetails.TextYAlignment = Enum.TextYAlignment.Top; petDetails.Text = "Select a Pet to view stats"
+petDetails = Instance.new("TextLabel", f3); petDetails.Size = UDim2.new(1, -10, 0, 140); petDetails.BackgroundTransparency = 1; petDetails.TextColor3 = ThemeSettings.TextColor; petDetails.TextXAlignment = Enum.TextXAlignment.Left; petDetails.TextYAlignment = Enum.TextYAlignment.Top; petDetails.Text = "Select a Pet to view stats"
 
-basicDD = createDropdown(f3, "Basic Pets", {"Nothing Here"}, false, function(l) State.currentPetLabel = l; State.currentPetTable = "Basic"; handleItemSelection(l, petRefsBasic, petDetails) end)
-advDD = createDropdown(f3, "Advance Pets", {"Nothing Here"}, false, function(l) State.currentPetLabel = l; State.currentPetTable = "Advanced"; handleItemSelection(l, petRefsAdv, petDetails) end)
-rareDD = createDropdown(f3, "Rare Pets", {"Nothing Here"}, false, function(l) State.currentPetLabel = l; State.currentPetTable = "Rare"; handleItemSelection(l, petRefsRare, petDetails) end)
-epicDD = createDropdown(f3, "Epic Pets", {"Nothing Here"}, false, function(l) State.currentPetLabel = l; State.currentPetTable = "Epic"; handleItemSelection(l, petRefsEpic, petDetails) end)
-uniqueDD = createDropdown(f3, "Unique Pets", {"Nothing Here"}, false, function(l) State.currentPetLabel = l; State.currentPetTable = "Unique"; handleItemSelection(l, petRefsUnique, petDetails) end)
+basicDD = createDropdown(f3, "Basic Pets", {"Nothing Here"}, false, function(l) State.currentPetLabel = l; State.currentPetTable = "Basic"; handleItemSelection(l, petRefsBasic, petDetails) end, nil, true)
+advDD = createDropdown(f3, "Advance Pets", {"Nothing Here"}, false, function(l) State.currentPetLabel = l; State.currentPetTable = "Advanced"; handleItemSelection(l, petRefsAdv, petDetails) end, nil, true)
+rareDD = createDropdown(f3, "Rare Pets", {"Nothing Here"}, false, function(l) State.currentPetLabel = l; State.currentPetTable = "Rare"; handleItemSelection(l, petRefsRare, petDetails) end, nil, true)
+epicDD = createDropdown(f3, "Epic Pets", {"Nothing Here"}, false, function(l) State.currentPetLabel = l; State.currentPetTable = "Epic"; handleItemSelection(l, petRefsEpic, petDetails) end, nil, true)
+uniqueDD = createDropdown(f3, "Unique Pets", {"Nothing Here"}, false, function(l) State.currentPetLabel = l; State.currentPetTable = "Unique"; handleItemSelection(l, petRefsUnique, petDetails) end, nil, true)
 
 local auraHeader = Instance.new("TextLabel", f3); auraHeader.Size = UDim2.new(1, -10, 0, 25); auraHeader.Text = "--- AURAS ---"; auraHeader.BackgroundTransparency = 1; auraHeader.TextColor3 = Color3.fromRGB(200, 0, 200); auraHeader.Font = Enum.Font.SourceSansBold; auraHeader.TextSize = 18
-auraDetails = Instance.new("TextLabel", f3); auraDetails.Size = UDim2.new(1, -10, 0, 140); auraDetails.BackgroundTransparency = 1; auraDetails.TextColor3 = Color3.new(1, 1, 1); auraDetails.TextXAlignment = Enum.TextXAlignment.Left; auraDetails.TextYAlignment = Enum.TextYAlignment.Top; auraDetails.Text = "Select an Aura to view stats"
+auraDetails = Instance.new("TextLabel", f3); auraDetails.Size = UDim2.new(1, -10, 0, 140); auraDetails.BackgroundTransparency = 1; auraDetails.TextColor3 = ThemeSettings.TextColor; auraDetails.TextXAlignment = Enum.TextXAlignment.Left; auraDetails.TextYAlignment = Enum.TextYAlignment.Top; auraDetails.Text = "Select an Aura to view stats"
 
-auraBasicDD = createDropdown(f3, "Basic Auras", {"Nothing Here"}, false, function(l) State.currentAuraLabel = l; State.currentAuraTable = "Basic"; handleItemSelection(l, auraRefsBasic, auraDetails) end)
-auraAdvDD = createDropdown(f3, "Advance Auras", {"Nothing Here"}, false, function(l) State.currentAuraLabel = l; State.currentAuraTable = "Advanced"; handleItemSelection(l, auraRefsAdv, auraDetails) end)
-auraRareDD = createDropdown(f3, "Rare Auras", {"Nothing Here"}, false, function(l) State.currentAuraLabel = l; State.currentAuraTable = "Rare"; handleItemSelection(l, auraRefsRare, auraDetails) end)
-auraEpicDD = createDropdown(f3, "Epic Auras", {"Nothing Here"}, false, function(l) State.currentAuraLabel = l; State.currentAuraTable = "Epic"; handleItemSelection(l, auraRefsEpic, auraDetails) end)
-auraUniqueDD = createDropdown(f3, "Unique Auras", {"Nothing Here"}, false, function(l) State.currentAuraLabel = l; State.currentAuraTable = "Unique"; handleItemSelection(l, auraRefsUnique, auraDetails) end)
+auraBasicDD = createDropdown(f3, "Basic Auras", {"Nothing Here"}, false, function(l) State.currentAuraLabel = l; State.currentAuraTable = "Basic"; handleItemSelection(l, auraRefsBasic, auraDetails) end, nil, true)
+auraAdvDD = createDropdown(f3, "Advance Auras", {"Nothing Here"}, false, function(l) State.currentAuraLabel = l; State.currentAuraTable = "Advanced"; handleItemSelection(l, auraRefsAdv, auraDetails) end, nil, true)
+auraRareDD = createDropdown(f3, "Rare Auras", {"Nothing Here"}, false, function(l) State.currentAuraLabel = l; State.currentAuraTable = "Rare"; handleItemSelection(l, auraRefsRare, auraDetails) end, nil, true)
+auraEpicDD = createDropdown(f3, "Epic Auras", {"Nothing Here"}, false, function(l) State.currentAuraLabel = l; State.currentAuraTable = "Epic"; handleItemSelection(l, auraRefsEpic, auraDetails) end, nil, true)
+auraUniqueDD = createDropdown(f3, "Unique Auras", {"Nothing Here"}, false, function(l) State.currentAuraLabel = l; State.currentAuraTable = "Unique"; handleItemSelection(l, auraRefsUnique, auraDetails) end, nil, true)
 
 local ultHeader = Instance.new("TextLabel", f3); ultHeader.Size = UDim2.new(1, -10, 0, 20); ultHeader.Text = "--- ULTIMATES ---"; ultHeader.BackgroundTransparency = 1; ultHeader.TextColor3 = Color3.fromRGB(0, 200, 200); ultHeader.Font = Enum.Font.SourceSansBold; ultHeader.TextXAlignment = Enum.TextXAlignment.Left
-local ultList = Instance.new("TextLabel", f3); ultList.Size = UDim2.new(1, -10, 0, 250); ultList.BackgroundTransparency = 1; ultList.TextColor3 = Color3.new(1, 1, 1); ultList.TextXAlignment = Enum.TextXAlignment.Left; ultList.TextYAlignment = Enum.TextYAlignment.Top; ultList.Text = "None"; ultList.TextWrapped = true; ultList.AutomaticSize = Enum.AutomaticSize.Y
+local ultList = Instance.new("TextLabel", f3); ultList.Size = UDim2.new(1, -10, 0, 250); ultList.BackgroundTransparency = 1; ultList.TextColor3 = ThemeSettings.TextColor; ultList.TextXAlignment = Enum.TextXAlignment.Left; ultList.TextYAlignment = Enum.TextYAlignment.Top; ultList.Text = "None"; ultList.TextWrapped = true; ultList.AutomaticSize = Enum.AutomaticSize.Y
 local gpHeader = Instance.new("TextLabel", f3); gpHeader.Size = UDim2.new(1, -10, 0, 20); gpHeader.Text = "--- GAMEPASSES ---"; gpHeader.BackgroundTransparency = 1; gpHeader.TextColor3 = Color3.fromRGB(0, 200, 100); gpHeader.Font = Enum.Font.SourceSansBold; gpHeader.TextXAlignment = Enum.TextXAlignment.Left
-local gpList = Instance.new("TextLabel", f3); gpList.Size = UDim2.new(1, -10, 0, 200); gpList.BackgroundTransparency = 1; gpList.TextColor3 = Color3.new(1, 1, 1); gpList.TextXAlignment = Enum.TextXAlignment.Left; gpList.TextYAlignment = Enum.TextYAlignment.Top; gpList.Text = "None"; gpList.TextWrapped = true; gpList.AutomaticSize = Enum.AutomaticSize.Y
+local gpList = Instance.new("TextLabel", f3); gpList.Size = UDim2.new(1, -10, 0, 200); gpList.BackgroundTransparency = 1; gpList.TextColor3 = ThemeSettings.TextColor; gpList.TextXAlignment = Enum.TextXAlignment.Left; gpList.TextYAlignment = Enum.TextYAlignment.Top; gpList.Text = "None"; gpList.TextWrapped = true; gpList.AutomaticSize = Enum.AutomaticSize.Y
 
+-- TAB 4: AUTO GYM
 local f4 = frames["Auto Gym"]
 local mapDD, gymDD
 mapDD = createDropdown(f4, "Select Map", {"Tiny Island", "Beach", "Legend Beach", "Frozen Island", "Mystic Island", "Inferno Island", "Legend Island", "Muscle King Island", "Jungle Island"}, false, function(map)
@@ -896,7 +1096,7 @@ gymDD = createDropdown(f4, "Select Gym", {"Select map first"}, false, function(g
 end)
 
 local gymBtn = Instance.new("TextButton", f4)
-gymBtn.Size = UDim2.new(1, -10, 0, 35); gymBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 100); gymBtn.Text = "Gym"; gymBtn.TextColor3 = Color3.new(1, 1, 1)
+gymBtn.Size = UDim2.new(1, -10, 0, 35); gymBtn.BackgroundColor3 = ThemeSettings.ButtonBg; gymBtn.Text = "Gym"; gymBtn.TextColor3 = ThemeSettings.TextColor
 gymBtn.MouseButton1Click:Connect(function()
     if not State.selectedMap or not State.selectedGym then return end
     local gym = gymData[State.selectedMap][State.selectedGym]; if not gym then return end
@@ -909,6 +1109,7 @@ gymBtn.MouseButton1Click:Connect(function()
 end)
 ui.autoGymBtn = createToggle(f4, "Auto Gym", "autoGym", function(val) if val then if not State.selectedMap or not State.selectedGym then return false end; startAutoGym() else stopAutoGym() end; return val end)
 
+-- TAB 5: AUTO TREADMILL
 local f5 = frames["Auto Treadmill"]
 local treadmillOptions = {}
 for _, name in ipairs({"Tiny Treadmill","Small Treadmill","Medium Treadmill","Large Treadmill","Big Treadmill","Mystic Treadmill","Legend Treadmill","Jungle Treadmill"}) do
@@ -919,6 +1120,7 @@ ui.treadmillDD = createDropdown(f5, "Select Treadmill", treadmillOptions, false,
 end)
 ui.autoTreadmillBtn = createToggle(f5, "Auto Treadmill", "autoTreadmill", function(val) if val then if not State.selectedTreadmill then return false end; startAutoTreadmill() else stopAutoTreadmill() end; return val end)
 
+-- TAB 6: AUTO CRYSTAL
 local f6 = frames["Auto Crystal"]
 local petList, auraList = {}, {}
 local function scanCrystalShop()
@@ -944,13 +1146,13 @@ end
 scanCrystalShop()
 
 local function evolveByName(itemName) if itemName then pcall(function() ReplicatedStorage.rEvents.petEvolveEvent:FireServer(itemName) end) end end
-local function createCrystalSection(parent, title, list, stateKeyData, stateKeyName, startAutoFunc, stopAutoFunc)
+local function createCrystalSection(parent, title, list, stateKeyData, stateKeyName, startAutoFunc, stopAutoFunc, searchable)
     local titleLabel = Instance.new("TextLabel", parent); titleLabel.Size = UDim2.new(1, -10, 0, 25); titleLabel.BackgroundTransparency = 1; titleLabel.Text = title; titleLabel.TextColor3 = Color3.fromRGB(255, 215, 0); titleLabel.Font = Enum.Font.GothamBold; titleLabel.TextSize = 14; titleLabel.TextXAlignment = Enum.TextXAlignment.Left
     local options, optionToData = {}, {}
     for _, data in ipairs(list) do local display = data.name .. " | Cost: " .. formatNum(data.cost) .. " | Rarity: " .. data.rarity; table.insert(options, display); optionToData[display] = data end
     if #options == 0 then table.insert(options, "Nothing available") end
     local imageLabel = Instance.new("ImageLabel", parent); imageLabel.Size = UDim2.new(1, -10, 0, 80); imageLabel.BackgroundTransparency = 1; imageLabel.ScaleType = Enum.ScaleType.Fit
-    local infoLabel = Instance.new("TextLabel", parent); infoLabel.Size = UDim2.new(1, -10, 0, 70); infoLabel.BackgroundColor3 = Color3.fromRGB(30, 30, 30); infoLabel.Text = "Select an item to view details\nCost: N/A"; infoLabel.TextColor3 = Color3.fromRGB(200, 200, 200); infoLabel.Font = Enum.Font.Gotham; infoLabel.TextSize = 11; infoLabel.TextWrapped = true; infoLabel.TextXAlignment = Enum.TextXAlignment.Left; infoLabel.TextYAlignment = Enum.TextYAlignment.Top; Instance.new("UICorner", infoLabel).CornerRadius = UDim.new(0, 8)
+    local infoLabel = Instance.new("TextLabel", parent); infoLabel.Size = UDim2.new(1, -10, 0, 70); infoLabel.BackgroundColor3 = ThemeSettings.ButtonBg; infoLabel.Text = "Select an item to view details\nCost: N/A"; infoLabel.TextColor3 = ThemeSettings.TextColor; infoLabel.Font = Enum.Font.Gotham; infoLabel.TextSize = 11; infoLabel.TextWrapped = true; infoLabel.TextXAlignment = Enum.TextXAlignment.Left; infoLabel.TextYAlignment = Enum.TextYAlignment.Top; Instance.new("UICorner", infoLabel).CornerRadius = UDim.new(0, ThemeSettings.CornerRadius)
     local dropdown = createDropdown(parent, title .. " Dropdown", options, false, function(display)
         if display == "Nothing available" then State[stateKeyData], State[stateKeyName] = nil, nil; infoLabel.Text = "Select an item to view details\nCost: N/A"; imageLabel.Image = ""
         else
@@ -960,19 +1162,20 @@ local function createCrystalSection(parent, title, list, stateKeyData, stateKeyN
                 imageLabel.Image = data.imageId ~= "" and data.imageId or ""
             end
         end
-    end)
-    local buyBtn = Instance.new("TextButton", parent); buyBtn.Size = UDim2.new(1, -10, 0, 35); buyBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 100); buyBtn.Text = "Buy"; buyBtn.TextColor3 = Color3.new(1, 1, 1)
+    end, nil, searchable)
+    local buyBtn = Instance.new("TextButton", parent); buyBtn.Size = UDim2.new(1, -10, 0, 35); buyBtn.BackgroundColor3 = ThemeSettings.ButtonBg; buyBtn.Text = "Buy"; buyBtn.TextColor3 = ThemeSettings.TextColor
     buyBtn.MouseButton1Click:Connect(function() local data = State[stateKeyData]; if data then fireBuyCrystal(data) end end)
-    local buy5Btn = Instance.new("TextButton", parent); buy5Btn.Size = UDim2.new(1, -10, 0, 35); buy5Btn.BackgroundColor3 = Color3.fromRGB(60, 60, 100); buy5Btn.Text = "Buy 5"; buy5Btn.TextColor3 = Color3.new(1, 1, 1)
+    local buy5Btn = Instance.new("TextButton", parent); buy5Btn.Size = UDim2.new(1, -10, 0, 35); buy5Btn.BackgroundColor3 = ThemeSettings.ButtonBg; buy5Btn.Text = "Buy 5"; buy5Btn.TextColor3 = ThemeSettings.TextColor
     buy5Btn.MouseButton1Click:Connect(function() local data = State[stateKeyData]; if data then for _ = 1, 5 do fireBuyCrystal(data) end end end)
-    local buy5EvolveBtn = Instance.new("TextButton", parent); buy5EvolveBtn.Size = UDim2.new(1, -10, 0, 35); buy5EvolveBtn.BackgroundColor3 = Color3.fromRGB(100, 60, 40); buy5EvolveBtn.Text = "Buy 5 & Evolve"; buy5EvolveBtn.TextColor3 = Color3.new(1, 1, 1)
+    local buy5EvolveBtn = Instance.new("TextButton", parent); buy5EvolveBtn.Size = UDim2.new(1, -10, 0, 35); buy5EvolveBtn.BackgroundColor3 = Color3.fromRGB(100, 60, 40); buy5EvolveBtn.Text = "Buy 5 & Evolve"; buy5EvolveBtn.TextColor3 = ThemeSettings.TextColor
     buy5EvolveBtn.MouseButton1Click:Connect(function() local data = State[stateKeyData]; if data then for _ = 1, 5 do fireBuyCrystal(data) end; evolveByName(data.name); infoLabel.Text = "Bought 5 and evolved " .. data.name end end)
     createToggle(parent, "Auto Buy", nil, function(on) if on then if not State[stateKeyData] then return false end; startAutoFunc() else stopAutoFunc() end; return on end)
     return dropdown
 end
-createCrystalSection(f6, "--- PETS ---", petList, "selectedPetCrystalData", "selectedPetCrystal", startAutoPetBuy, stopAutoPetBuy)
-createCrystalSection(f6, "--- AURAS ---", auraList, "selectedAuraCrystalData", "selectedAuraCrystal", startAutoAuraBuy, stopAutoAuraBuy)
+createCrystalSection(f6, "--- PETS ---", petList, "selectedPetCrystalData", "selectedPetCrystal", startAutoPetBuy, stopAutoPetBuy, true) -- searchable
+createCrystalSection(f6, "--- AURAS ---", auraList, "selectedAuraCrystalData", "selectedAuraCrystal", startAutoAuraBuy, stopAutoAuraBuy, true) -- searchable
 
+-- TAB 7: GLITCHABLE REBIRTH
 local f7 = frames["Glitchable Rebirth"]
 local glitchRockOptions = {}
 for _, rockName in ipairs({"Tiny Rock", "Punching Rock", "Large Rock", "Golden Rock", "Frozen Rock", "Mystic Rock", "Inferno Rock", "Legend Rock", "Muscle King Rock", "Jungle Rock"}) do
@@ -983,10 +1186,10 @@ ui.glitchRockDD = createDropdown(f7, "Rock Dropdown", glitchRockOptions, false, 
     local rockName = v:match("^(.-) %("); selectedGlitchRock = rockName and rockData[rockName] and rockName or nil
     expGivesResult = nil; _G.GlitchExpGivesLabel.Text = "EXP GIVES: N/A"; _G.GlitchGlitchableLabel.Text = "GLITCHABLE?: N/A"; _G.GlitchRebirthRequiredLabel.Text = "Rebirth Required: N/A"; _G.GlitchPetExpCalcLabel.Text = "Result: N/A"
 end)
-local expGivesLabel = Instance.new("TextLabel", f7); expGivesLabel.Size = UDim2.new(1, -10, 0, 25); expGivesLabel.BackgroundTransparency = 1; expGivesLabel.Text = "EXP GIVES: N/A"; expGivesLabel.TextColor3 = Color3.new(1, 1, 1); expGivesLabel.Font = Enum.Font.Gotham; expGivesLabel.TextSize = 12; _G.GlitchExpGivesLabel = expGivesLabel
-local glitchableLabel = Instance.new("TextLabel", f7); glitchableLabel.Size = UDim2.new(1, -10, 0, 25); glitchableLabel.BackgroundTransparency = 1; glitchableLabel.Text = "GLITCHABLE?: N/A"; glitchableLabel.TextColor3 = Color3.new(1, 1, 1); glitchableLabel.Font = Enum.Font.Gotham; glitchableLabel.TextSize = 12; _G.GlitchGlitchableLabel = glitchableLabel
+local expGivesLabel = Instance.new("TextLabel", f7); expGivesLabel.Size = UDim2.new(1, -10, 0, 25); expGivesLabel.BackgroundTransparency = 1; expGivesLabel.Text = "EXP GIVES: N/A"; expGivesLabel.TextColor3 = ThemeSettings.TextColor; expGivesLabel.Font = Enum.Font.Gotham; expGivesLabel.TextSize = 12; _G.GlitchExpGivesLabel = expGivesLabel
+local glitchableLabel = Instance.new("TextLabel", f7); glitchableLabel.Size = UDim2.new(1, -10, 0, 25); glitchableLabel.BackgroundTransparency = 1; glitchableLabel.Text = "GLITCHABLE?: N/A"; glitchableLabel.TextColor3 = ThemeSettings.TextColor; glitchableLabel.Font = Enum.Font.Gotham; glitchableLabel.TextSize = 12; _G.GlitchGlitchableLabel = glitchableLabel
 
-local calcExpGivesBtn = Instance.new("TextButton", f7); calcExpGivesBtn.Size = UDim2.new(1, -10, 0, 35); calcExpGivesBtn.BackgroundColor3 = Color3.fromRGB(40, 80, 140); calcExpGivesBtn.Text = "Calculate My Rebirth Exp Gives"; calcExpGivesBtn.TextColor3 = Color3.new(1, 1, 1)
+local calcExpGivesBtn = Instance.new("TextButton", f7); calcExpGivesBtn.Size = UDim2.new(1, -10, 0, 35); calcExpGivesBtn.BackgroundColor3 = ThemeSettings.ButtonBg; calcExpGivesBtn.Text = "Calculate My Rebirth Exp Gives"; calcExpGivesBtn.TextColor3 = ThemeSettings.TextColor
 calcExpGivesBtn.MouseButton1Click:Connect(function()
     if not selectedGlitchRock then return end; local rock = rockData[selectedGlitchRock]; if not rock then return end
     local rebirths = player.leaderstats and player.leaderstats:FindFirstChild("Rebirths") and player.leaderstats.Rebirths.Value or 0
@@ -994,34 +1197,35 @@ calcExpGivesBtn.MouseButton1Click:Connect(function()
     expGivesLabel.Text = "EXP GIVES: " .. result; glitchableLabel.Text = "GLITCHABLE?: " .. (result % 1 == 0 and "YES" or "NO")
 end)
 
-local expTextBox = Instance.new("TextBox", f7); expTextBox.Size = UDim2.new(1, -10, 0, 30); expTextBox.PlaceholderText = "EXP (whole numbers only)"; expTextBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); expTextBox.TextColor3 = Color3.new(1, 1, 1); expTextBox.Text = ""
+local expTextBox = Instance.new("TextBox", f7); expTextBox.Size = UDim2.new(1, -10, 0, 30); expTextBox.PlaceholderText = "EXP (whole numbers only)"; expTextBox.BackgroundColor3 = ThemeSettings.ButtonBg; expTextBox.TextColor3 = ThemeSettings.TextColor; expTextBox.Text = ""
 expTextBox:GetPropertyChangedSignal("Text"):Connect(function() local filtered = expTextBox.Text:gsub("[^%d]", ""); if filtered ~= expTextBox.Text then expTextBox.Text = filtered end end)
 
-local calcRebirthRequiredBtn = Instance.new("TextButton", f7); calcRebirthRequiredBtn.Size = UDim2.new(1, -10, 0, 35); calcRebirthRequiredBtn.BackgroundColor3 = Color3.fromRGB(40, 80, 140); calcRebirthRequiredBtn.Text = "Check Rebirth Required"; calcRebirthRequiredBtn.TextColor3 = Color3.new(1, 1, 1)
+local calcRebirthRequiredBtn = Instance.new("TextButton", f7); calcRebirthRequiredBtn.Size = UDim2.new(1, -10, 0, 35); calcRebirthRequiredBtn.BackgroundColor3 = ThemeSettings.ButtonBg; calcRebirthRequiredBtn.Text = "Check Rebirth Required"; calcRebirthRequiredBtn.TextColor3 = ThemeSettings.TextColor
 calcRebirthRequiredBtn.MouseButton1Click:Connect(function()
     if not selectedGlitchRock then return end; local rock = rockData[selectedGlitchRock]; if not rock then return end
     local expValue = tonumber(expTextBox.Text); if not expValue then return end
     local result = (expValue / rock.glitchValue) - 20
     _G.GlitchRebirthRequiredLabel.Text = result % 1 ~= 0 and "Rebirth Required: DECIMAL NUMBER DETECTED NO RESULT OUT" or "Rebirth Required: " .. math.floor(result)
 end)
-local rebirthRequiredLabel = Instance.new("TextLabel", f7); rebirthRequiredLabel.Size = UDim2.new(1, -10, 0, 25); rebirthRequiredLabel.BackgroundTransparency = 1; rebirthRequiredLabel.Text = "Rebirth Required: N/A"; rebirthRequiredLabel.TextColor3 = Color3.new(1, 1, 1); rebirthRequiredLabel.Font = Enum.Font.Gotham; rebirthRequiredLabel.TextSize = 12; _G.GlitchRebirthRequiredLabel = rebirthRequiredLabel
+local rebirthRequiredLabel = Instance.new("TextLabel", f7); rebirthRequiredLabel.Size = UDim2.new(1, -10, 0, 25); rebirthRequiredLabel.BackgroundTransparency = 1; rebirthRequiredLabel.Text = "Rebirth Required: N/A"; rebirthRequiredLabel.TextColor3 = ThemeSettings.TextColor; rebirthRequiredLabel.Font = Enum.Font.Gotham; rebirthRequiredLabel.TextSize = 12; _G.GlitchRebirthRequiredLabel = rebirthRequiredLabel
 
-local petExpTextBox = Instance.new("TextBox", f7); petExpTextBox.Size = UDim2.new(1, -10, 0, 30); petExpTextBox.PlaceholderText = "PET EXP (whole numbers only)"; petExpTextBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); petExpTextBox.TextColor3 = Color3.new(1, 1, 1); petExpTextBox.Text = ""
+local petExpTextBox = Instance.new("TextBox", f7); petExpTextBox.Size = UDim2.new(1, -10, 0, 30); petExpTextBox.PlaceholderText = "PET EXP (whole numbers only)"; petExpTextBox.BackgroundColor3 = ThemeSettings.ButtonBg; petExpTextBox.TextColor3 = ThemeSettings.TextColor; petExpTextBox.Text = ""
 petExpTextBox:GetPropertyChangedSignal("Text"):Connect(function() local filtered = petExpTextBox.Text:gsub("[^%d]", ""); if filtered ~= petExpTextBox.Text then petExpTextBox.Text = filtered end end)
 
-local calcPetExpBtn = Instance.new("TextButton", f7); calcPetExpBtn.Size = UDim2.new(1, -10, 0, 35); calcPetExpBtn.BackgroundColor3 = Color3.fromRGB(40, 80, 140); calcPetExpBtn.Text = "Calculate PET EXP - EXP GIVES"; calcPetExpBtn.TextColor3 = Color3.new(1, 1, 1)
+local calcPetExpBtn = Instance.new("TextButton", f7); calcPetExpBtn.Size = UDim2.new(1, -10, 0, 35); calcPetExpBtn.BackgroundColor3 = ThemeSettings.ButtonBg; calcPetExpBtn.Text = "Calculate PET EXP - EXP GIVES"; calcPetExpBtn.TextColor3 = ThemeSettings.TextColor
 calcPetExpBtn.MouseButton1Click:Connect(function()
     if not selectedGlitchRock or expGivesResult == nil then return end
     local petExp = tonumber(petExpTextBox.Text); if not petExp then return end
     _G.GlitchPetExpCalcLabel.Text = "Result: " .. (petExp - expGivesResult)
 end)
-local petExpCalcLabel = Instance.new("TextLabel", f7); petExpCalcLabel.Size = UDim2.new(1, -10, 0, 25); petExpCalcLabel.BackgroundTransparency = 1; petExpCalcLabel.Text = "Result: N/A"; petExpCalcLabel.TextColor3 = Color3.new(1, 1, 1); petExpCalcLabel.Font = Enum.Font.Gotham; petExpCalcLabel.TextSize = 12; _G.GlitchPetExpCalcLabel = petExpCalcLabel
+local petExpCalcLabel = Instance.new("TextLabel", f7); petExpCalcLabel.Size = UDim2.new(1, -10, 0, 25); petExpCalcLabel.BackgroundTransparency = 1; petExpCalcLabel.Text = "Result: N/A"; petExpCalcLabel.TextColor3 = ThemeSettings.TextColor; petExpCalcLabel.Font = Enum.Font.Gotham; petExpCalcLabel.TextSize = 12; _G.GlitchPetExpCalcLabel = petExpCalcLabel
 
+-- TAB 8: CALCULATOR
 local f8 = frames["Calculator"]
-local calcInput = Instance.new("TextBox", f8); calcInput.Size = UDim2.new(1, -10, 0, 35); calcInput.PlaceholderText = "Expression (e.g. 2*2 or (20+20)*12.5)"; calcInput.BackgroundColor3 = Color3.fromRGB(40, 40, 40); calcInput.TextColor3 = Color3.new(1, 1, 1); calcInput.Font = Enum.Font.Gotham; calcInput.TextSize = 14; calcInput.ClearTextOnFocus = false
-local calcResultLabel = Instance.new("TextLabel", f8); calcResultLabel.Size = UDim2.new(1, -10, 0, 30); calcResultLabel.BackgroundTransparency = 1; calcResultLabel.Text = "Result: "; calcResultLabel.TextColor3 = Color3.new(1, 1, 1); calcResultLabel.Font = Enum.Font.GothamBold; calcResultLabel.TextSize = 16
+local calcInput = Instance.new("TextBox", f8); calcInput.Size = UDim2.new(1, -10, 0, 35); calcInput.PlaceholderText = "Expression (e.g. 2*2 or (20+20)*12.5)"; calcInput.BackgroundColor3 = ThemeSettings.ButtonBg; calcInput.TextColor3 = ThemeSettings.TextColor; calcInput.Font = Enum.Font.Gotham; calcInput.TextSize = 14; calcInput.ClearTextOnFocus = false
+local calcResultLabel = Instance.new("TextLabel", f8); calcResultLabel.Size = UDim2.new(1, -10, 0, 30); calcResultLabel.BackgroundTransparency = 1; calcResultLabel.Text = "Result: "; calcResultLabel.TextColor3 = ThemeSettings.TextColor; calcResultLabel.Font = Enum.Font.GothamBold; calcResultLabel.TextSize = 16
 
-local calcBtn = Instance.new("TextButton", f8); calcBtn.Size = UDim2.new(1, -10, 0, 40); calcBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 100); calcBtn.Text = "Calculate"; calcBtn.TextColor3 = Color3.new(1, 1, 1)
+local calcBtn = Instance.new("TextButton", f8); calcBtn.Size = UDim2.new(1, -10, 0, 40); calcBtn.BackgroundColor3 = ThemeSettings.ButtonBg; calcBtn.Text = "Calculate"; calcBtn.TextColor3 = ThemeSettings.TextColor
 calcBtn.MouseButton1Click:Connect(function()
     local expr = calcInput.Text:gsub("%s", ""):gsub("=", ""):gsub("[xX]", "*")
     if expr == "" then calcResultLabel.Text = "Result: (empty)"; return end
@@ -1029,9 +1233,10 @@ calcBtn.MouseButton1Click:Connect(function()
     local success, result = pcall(function() return loadstring("return " .. expr)() end)
     calcResultLabel.Text = success and "Result: " .. tostring(result) or "Result: Invalid expression"
 end)
-local clearCalcBtn = Instance.new("TextButton", f8); clearCalcBtn.Size = UDim2.new(1, -10, 0, 35); clearCalcBtn.BackgroundColor3 = Color3.fromRGB(90, 40, 40); clearCalcBtn.Text = "Clear Text"; clearCalcBtn.TextColor3 = Color3.new(1, 1, 1)
+local clearCalcBtn = Instance.new("TextButton", f8); clearCalcBtn.Size = UDim2.new(1, -10, 0, 35); clearCalcBtn.BackgroundColor3 = Color3.fromRGB(90, 40, 40); clearCalcBtn.Text = "Clear Text"; clearCalcBtn.TextColor3 = ThemeSettings.TextColor
 clearCalcBtn.MouseButton1Click:Connect(function() calcInput.Text = ""; calcResultLabel.Text = "Result: " end)
 
+-- TAB 9: TELEPORT
 local f9 = frames["Teleport"]
 local teleportList = {
     {name = "Safe Spot", pos = Vector3.new(218.5, 41.1, -8129.3)}, {name = "Tiny Island", pos = Vector3.new(-33.6, 7.4, 1892.8)},
@@ -1041,31 +1246,32 @@ local teleportList = {
     {name = "Jungle Island", pos = Vector3.new(-8685.6, 6.7, 2392.3)}
 }
 for _, tpData in ipairs(teleportList) do
-    local btn = Instance.new("TextButton", f9); btn.Size = UDim2.new(1, -10, 0, 35); btn.Text = tpData.name; btn.BackgroundColor3 = Color3.fromRGB(60, 60, 100); btn.TextColor3 = Color3.new(1, 1, 1)
+    local btn = Instance.new("TextButton", f9); btn.Size = UDim2.new(1, -10, 0, 35); btn.Text = tpData.name; btn.BackgroundColor3 = ThemeSettings.ButtonBg; btn.TextColor3 = ThemeSettings.TextColor
     btn.MouseButton1Click:Connect(function() local char = player.Character; if char and char:FindFirstChild("HumanoidRootPart") then char.HumanoidRootPart.CFrame = CFrame.new(tpData.pos) end end)
 end
 
+-- TAB 10: LEADERBOARD
 local f_leaderboard = frames["Leaderboard"]
 local leaderboardTitle = Instance.new("TextLabel", f_leaderboard); leaderboardTitle.Size = UDim2.new(1, -10, 0, 25); leaderboardTitle.BackgroundTransparency = 1; leaderboardTitle.Text = "--- LEADERBOARD ---"; leaderboardTitle.TextColor3 = Color3.fromRGB(255, 215, 0); leaderboardTitle.Font = Enum.Font.GothamBold; leaderboardTitle.TextSize = 16; leaderboardTitle.TextXAlignment = Enum.TextXAlignment.Center
-local checkStrengthBtn = Instance.new("TextButton", f_leaderboard); checkStrengthBtn.Size = UDim2.new(1, -10, 0, 40); checkStrengthBtn.BackgroundColor3 = Color3.fromRGB(60, 100, 60); checkStrengthBtn.Text = "Check All Players Strength"; checkStrengthBtn.TextColor3 = Color3.new(1, 1, 1); checkStrengthBtn.Font = Enum.Font.GothamBold; checkStrengthBtn.TextSize = 14
-local leaderboardScrollingFrame = Instance.new("ScrollingFrame", f_leaderboard); leaderboardScrollingFrame.Size = UDim2.new(1, -10, 0, 300); leaderboardScrollingFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35); leaderboardScrollingFrame.ScrollBarThickness = isMobile and 6 or 4; leaderboardScrollingFrame.ClipsDescendants = true
+local checkStrengthBtn = Instance.new("TextButton", f_leaderboard); checkStrengthBtn.Size = UDim2.new(1, -10, 0, 40); checkStrengthBtn.BackgroundColor3 = ThemeSettings.ButtonBg; checkStrengthBtn.Text = "Check All Players Strength"; checkStrengthBtn.TextColor3 = ThemeSettings.TextColor; checkStrengthBtn.Font = Enum.Font.GothamBold; checkStrengthBtn.TextSize = 14
+local leaderboardScrollingFrame = Instance.new("ScrollingFrame", f_leaderboard); leaderboardScrollingFrame.Size = UDim2.new(1, -10, 0, 300); leaderboardScrollingFrame.BackgroundColor3 = ThemeSettings.MainBg; leaderboardScrollingFrame.ScrollBarThickness = isMobile and 6 or 4; leaderboardScrollingFrame.ClipsDescendants = true
 local leaderboardLayout = Instance.new("UIListLayout", leaderboardScrollingFrame); leaderboardLayout.Padding = UDim.new(0, 2); leaderboardLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
 local function updateLeaderboardDisplay()
     for _, child in ipairs(leaderboardScrollingFrame:GetChildren()) do if child:IsA("TextLabel") or child:IsA("Frame") then child:Destroy() end end
     local data = State.leaderboardData
     if not data or #data == 0 then
-        local noDataLabel = Instance.new("TextLabel", leaderboardScrollingFrame); noDataLabel.Size = UDim2.new(1, 0, 0, 30); noDataLabel.BackgroundTransparency = 1; noDataLabel.Text = "No data available."; noDataLabel.TextColor3 = Color3.fromRGB(200, 200, 200); noDataLabel.TextSize = 12
+        local noDataLabel = Instance.new("TextLabel", leaderboardScrollingFrame); noDataLabel.Size = UDim2.new(1, 0, 0, 30); noDataLabel.BackgroundTransparency = 1; noDataLabel.Text = "No data available."; noDataLabel.TextColor3 = ThemeSettings.TextColor; noDataLabel.TextSize = 12
         leaderboardScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 35); return
     end
     local rank = 1
     for _, entry in ipairs(data) do
         local isLocal = entry.name == player.DisplayName .. " (@" .. player.Name .. ")"
-        local entryFrame = Instance.new("Frame", leaderboardScrollingFrame); entryFrame.Size = UDim2.new(1, -4, 0, 45); entryFrame.BackgroundColor3 = isLocal and Color3.fromRGB(60, 80, 40) or Color3.fromRGB(40, 40, 40); entryFrame.BorderSizePixel = 0; Instance.new("UICorner", entryFrame).CornerRadius = UDim.new(0, 4)
-        local rankLabel = Instance.new("TextLabel", entryFrame); rankLabel.Size = UDim2.new(0, 40, 1, 0); rankLabel.Position = UDim2.fromOffset(5, 0); rankLabel.BackgroundTransparency = 1; rankLabel.Text = "#" .. rank; rankLabel.TextColor3 = Color3.fromRGB(255, 200, 50); rankLabel.Font = Enum.Font.GothamBold; rankLabel.TextSize = 14; rankLabel.TextXAlignment = Enum.TextXAlignment.Left
-        local nameLabel = Instance.new("TextLabel", entryFrame); nameLabel.Size = UDim2.new(0, 180, 0, 20); nameLabel.Position = UDim2.fromOffset(50, 2); nameLabel.BackgroundTransparency = 1; nameLabel.Text = entry.name; nameLabel.TextColor3 = isLocal and Color3.new(0, 255, 100) or Color3.new(1, 1, 1); nameLabel.Font = Enum.Font.Gotham; nameLabel.TextSize = 11; nameLabel.TextXAlignment = Enum.TextXAlignment.Left; nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
+        local entryFrame = Instance.new("Frame", leaderboardScrollingFrame); entryFrame.Size = UDim2.new(1, -4, 0, 45); entryFrame.BackgroundColor3 = isLocal and ThemeSettings.ButtonOnBg or ThemeSettings.ButtonBg; entryFrame.BorderSizePixel = 0; Instance.new("UICorner", entryFrame).CornerRadius = UDim.new(0, ThemeSettings.CornerRadius)
+        local rankLabel = Instance.new("TextLabel", entryFrame); rankLabel.Size = UDim2.new(0, 40, 1, 0); rankLabel.Position = UDim2.fromOffset(5, 0); rankLabel.BackgroundTransparency = 1; rankLabel.Text = "#" .. rank; rankLabel.TextColor3 = ThemeSettings.TextColor; rankLabel.Font = Enum.Font.GothamBold; rankLabel.TextSize = 14; rankLabel.TextXAlignment = Enum.TextXAlignment.Left
+        local nameLabel = Instance.new("TextLabel", entryFrame); nameLabel.Size = UDim2.new(0, 180, 0, 20); nameLabel.Position = UDim2.fromOffset(50, 2); nameLabel.BackgroundTransparency = 1; nameLabel.Text = entry.name; nameLabel.TextColor3 = isLocal and Color3.new(0, 255, 100) or ThemeSettings.TextColor; nameLabel.Font = Enum.Font.Gotham; nameLabel.TextSize = 11; nameLabel.TextXAlignment = Enum.TextXAlignment.Left; nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
         local rebirthDisplay = entry.rebirth >= 1000000 and formatNum(entry.rebirth) or tostring(math.floor(entry.rebirth))
-        local strengthLabel = Instance.new("TextLabel", entryFrame); strengthLabel.Size = UDim2.new(1, -55, 0, 20); strengthLabel.Position = UDim2.fromOffset(50, 22); strengthLabel.BackgroundTransparency = 1; strengthLabel.Text = "Strength: " .. formatNum(entry.strength) .. " | Rebirth: " .. rebirthDisplay .. " | Durability: " .. formatNum(entry.durability); strengthLabel.TextColor3 = Color3.fromRGB(200, 200, 200); strengthLabel.Font = Enum.Font.Gotham; strengthLabel.TextSize = 10; strengthLabel.TextXAlignment = Enum.TextXAlignment.Left
+        local strengthLabel = Instance.new("TextLabel", entryFrame); strengthLabel.Size = UDim2.new(1, -55, 0, 20); strengthLabel.Position = UDim2.fromOffset(50, 22); strengthLabel.BackgroundTransparency = 1; strengthLabel.Text = "Strength: " .. formatNum(entry.strength) .. " | Rebirth: " .. rebirthDisplay .. " | Durability: " .. formatNum(entry.durability); strengthLabel.TextColor3 = ThemeSettings.TextColor; strengthLabel.Font = Enum.Font.Gotham; strengthLabel.TextSize = 10; strengthLabel.TextXAlignment = Enum.TextXAlignment.Left
         rank = rank + 1
     end
     leaderboardScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, #data * 47 + 5)
@@ -1076,6 +1282,7 @@ table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do task.wait(10); if State.stopEverything then continue end; if frames["Leaderboard"].Visible and #State.leaderboardData > 0 then checkAllPlayersStrength(); updateLeaderboardDisplay() end end
 end))
 
+-- TAB 11: CONFIG
 local f10 = frames["Config"]
 local configFilePath = "ML_Expert_Configs.json"
 local savedConfigs = {}
@@ -1086,14 +1293,14 @@ for name, _ in pairs(savedConfigs) do table.insert(configNames, name) end
 if #configNames == 0 then table.insert(configNames, "No saved configs") end
 
 ui.configDropdown = createDropdown(f10, "Saved Config", configNames, false, function(name) if name ~= "No saved configs" then selectedConfigName = name end end)
-local nameTextBox = Instance.new("TextBox", f10); nameTextBox.Size = UDim2.new(1, -10, 0, 30); nameTextBox.PlaceholderText = "Config Name"; nameTextBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40); nameTextBox.TextColor3 = Color3.new(1, 1, 1); nameTextBox.Text = ""
+local nameTextBox = Instance.new("TextBox", f10); nameTextBox.Size = UDim2.new(1, -10, 0, 30); nameTextBox.PlaceholderText = "Config Name"; nameTextBox.BackgroundColor3 = ThemeSettings.ButtonBg; nameTextBox.TextColor3 = ThemeSettings.TextColor; nameTextBox.Text = ""
 
 local function stopAllAutomations()
     for key, btn in pairs(ui.toggleButtons) do if SetToggle[btn] then SetToggle[btn](false) end end
     stopAutoGym(); stopAutoTreadmill(); stopAutoPetBuy(); stopAutoAuraBuy()
 end
 
-local saveBtn = Instance.new("TextButton", f10); saveBtn.Size = UDim2.new(1, -10, 0, 35); saveBtn.Text = "Save Config"; saveBtn.BackgroundColor3 = Color3.fromRGB(40, 120, 40); saveBtn.TextColor3 = Color3.new(1, 1, 1)
+local saveBtn = Instance.new("TextButton", f10); saveBtn.Size = UDim2.new(1, -10, 0, 35); saveBtn.Text = "Save Config"; saveBtn.BackgroundColor3 = ThemeSettings.ButtonOnBg; saveBtn.TextColor3 = ThemeSettings.TextColor
 saveBtn.MouseButton1Click:Connect(function()
     local name = nameTextBox.Text:gsub("^%s*(.-)%s*$", "%1"); if name == "" then return end
     local totalGlitchSeconds = State.glitchAccumulated + (State.autoGlitch and (os.time() - State.glitchStartTime) or 0)
@@ -1108,7 +1315,7 @@ end)
 
 createToggle(f10, "Stop Everything", "stopEverything", function(val) State.stopEverything = val; return val end)
 
-local loadBtn = Instance.new("TextButton", f10); loadBtn.Size = UDim2.new(1, -10, 0, 35); loadBtn.Text = "Load Config"; loadBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 120); loadBtn.TextColor3 = Color3.new(1, 1, 1)
+local loadBtn = Instance.new("TextButton", f10); loadBtn.Size = UDim2.new(1, -10, 0, 35); loadBtn.Text = "Load Config"; loadBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 120); loadBtn.TextColor3 = ThemeSettings.TextColor
 loadBtn.MouseButton1Click:Connect(function()
     if not selectedConfigName or not savedConfigs[selectedConfigName] then return end
     stopAllAutomations(); local preset = savedConfigs[selectedConfigName]
@@ -1143,7 +1350,7 @@ loadBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-local removeConfigBtn = Instance.new("TextButton", f10); removeConfigBtn.Size = UDim2.new(1, -10, 0, 35); removeConfigBtn.Text = "Remove Config"; removeConfigBtn.BackgroundColor3 = Color3.fromRGB(120, 40, 40); removeConfigBtn.TextColor3 = Color3.new(1, 1, 1)
+local removeConfigBtn = Instance.new("TextButton", f10); removeConfigBtn.Size = UDim2.new(1, -10, 0, 35); removeConfigBtn.Text = "Remove Config"; removeConfigBtn.BackgroundColor3 = Color3.fromRGB(120, 40, 40); removeConfigBtn.TextColor3 = ThemeSettings.TextColor
 removeConfigBtn.MouseButton1Click:Connect(function()
     if not selectedConfigName or selectedConfigName == "No saved configs" or not savedConfigs[selectedConfigName] then return end
     createConfirmPopup("Are you sure you want to delete config \"" .. selectedConfigName .. "\"?", function(confirmed)
@@ -1155,6 +1362,7 @@ removeConfigBtn.MouseButton1Click:Connect(function()
     end)
 end)
 
+-- TAB 12: KILLER
 local f_killer = frames["Killer"]
 local function refreshKillerDropdowns()
     local playerOptions = {}; local hasOthers = false
@@ -1174,7 +1382,7 @@ ui.killerPlayerDD = createDropdown(f_killer, "Player Dropdown", {}, true, functi
     end
 end, function(display)
     if display == "No one" then return false end; local username = getUsernameFromDisplay(display); return KillerState.selectedPlayers[username] == true
-end)
+end, true) -- searchable
 
 ui.killerWhitelistDD = createDropdown(f_killer, "Whitelist Dropdown", {}, true, function(display)
     if display == "No one" then return false end
@@ -1187,7 +1395,7 @@ ui.killerWhitelistDD = createDropdown(f_killer, "Whitelist Dropdown", {}, true, 
     end
 end, function(display)
     if display == "No one" then return false end; local username = getUsernameFromDisplay(display); return isWhitelisted(username)
-end)
+end, true) -- searchable
 
 ui.whitelistFriendsToggle = createToggle(f_killer, "Whitelist Friends", "whitelistFriends", function(val)
     KillerState.whitelistFriendsEnabled = val
@@ -1345,6 +1553,7 @@ Players.PlayerRemoving:Connect(function(p)
 end)
 refreshKillerDropdowns()
 
+-- MAIN LOOPS (unchanged)
 table.insert(getgenv().ML_Expert_Loops, RunService.Heartbeat:Connect(function()
     if State.stopEverything then return end
     if State.autoMuscleKing and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
