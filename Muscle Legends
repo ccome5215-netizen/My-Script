@@ -1,6 +1,5 @@
--- Muscle Legends Expert Hub (Refactored v2.0)
--- Optimized for Solara & Delta | Dual-Hand Independent Killer | Persistent Pet/Aura Tracking
-
+-- Muscle Legends Expert Hub (Refactored v2.1)
+-- Single right‑hand killer | Anchor without attachments | Persistent CHANGED/NEW pet tracking
 -- ==================== SAFE CLEANUP ====================
 local oldUI = getgenv().ML_Expert_UI
 local oldLoops = getgenv().ML_Expert_Loops
@@ -68,8 +67,7 @@ local State = {
 
 local KillerState = {
     selectedPlayers = {}, manualWhitelist = {}, autoWhitelist = {}, whitelistFriendsEnabled = false,
-    killSelectedEnabled = false, killEveryoneEnabled = false, autoGoodKarmaEnabled = false, autoEvilKarmaEnabled = false,
-    LeftTarget = nil, RightTarget = nil -- Independent Dual-Hand Targets
+    killSelectedEnabled = false, killEveryoneEnabled = false, autoGoodKarmaEnabled = false, autoEvilKarmaEnabled = false
 }
 
 local killSources = { selected = {}, everyone = {}, goodKarma = {}, evilKarma = {} }
@@ -692,8 +690,9 @@ local petDetails, auraDetails
 local petRefsBasic, petRefsAdv, petRefsRare, petRefsEpic, petRefsUnique = {}, {}, {}, {}, {}
 local auraRefsBasic, auraRefsAdv, auraRefsRare, auraRefsEpic, auraRefsUnique = {}, {}, {}, {}, {}
 
--- PERSISTENT INVENTORY CACHE (Fixes the fake NEW bug)
-local PlayerInventoryCache = {} -- [playerName] = { [itemInstance] = {state} }
+-- PERSISTENT INVENTORY CACHE (Fixes the fake NEW bug + CHANGED detection)
+local PlayerInventoryCache = {}
+local PlayerInventoryChanged = {} -- [playerName][item] = true if changed
 
 local function getPetAuraState(item)
     local state = {}
@@ -712,10 +711,21 @@ local function getPetAuraState(item)
     return state
 end
 
+local function statesEqual(s1, s2)
+    for k, v in pairs(s1) do if s2[k] ~= v then return false end end
+    for k, v in pairs(s2) do if s1[k] ~= v then return false end end
+    return true
+end
+
 local function setupItemTracking(item, playerName)
     local function checkChange()
         if not PlayerInventoryCache[playerName] or not PlayerInventoryCache[playerName][item] then return end
         local newState = getPetAuraState(item)
+        local oldState = PlayerInventoryCache[playerName][item]
+        if not statesEqual(oldState, newState) then
+            PlayerInventoryChanged[playerName] = PlayerInventoryChanged[playerName] or {}
+            PlayerInventoryChanged[playerName][item] = true
+        end
         PlayerInventoryCache[playerName][item] = newState
         refreshPetDropdownsForPlayer(playerName)
     end
@@ -734,6 +744,7 @@ end
 local function initializePlayerInventory(playerName)
     if PlayerInventoryCache[playerName] then return end
     PlayerInventoryCache[playerName] = {}
+    PlayerInventoryChanged[playerName] = {}
     local targetPlayer = Players:FindFirstChild(playerName)
     if not targetPlayer then return end
 
@@ -765,6 +776,7 @@ local function refreshPetDropdown(folder, dropdownObj, refStore, playerName)
     
     initializePlayerInventory(playerName)
     local cache = PlayerInventoryCache[playerName]
+    local changed = PlayerInventoryChanged[playerName] or {}
     local counts, options, itemRefs = {}, {}, {}
     
     for _, item in ipairs(folder:GetChildren()) do
@@ -774,10 +786,11 @@ local function refreshPetDropdown(folder, dropdownObj, refStore, playerName)
         local finalName = cleanName
         
         if not cache[item] then
-            -- Item is NOT in cache, meaning it was added AFTER initialization -> TRUE NEW
             finalName = finalName .. " *NEW*"
             cache[item] = getPetAuraState(item)
             setupItemTracking(item, playerName)
+        elseif changed[item] then
+            finalName = finalName .. " *CHANGED*"
         end
         
         table.insert(options, finalName)
@@ -812,9 +825,16 @@ end
 
 local function handleItemSelection(label, refTable, detailLabel)
     if not label or label == "Nothing Here" then return end
-    local stripped = label:gsub(" %*NEW%*", ""):gsub(" %*CHANGED%*", "")
-    local item = refTable[stripped] or refTable[label]
+    -- Strip marks
+    local clean = label:gsub(" %*NEW%*", ""):gsub(" %*CHANGED%*", "")
+    local item = refTable[clean] or refTable[label]
     if item then
+        -- Clear CHANGED mark for this item (optional)
+        local playerName = State.statsTarget
+        if playerName and PlayerInventoryChanged[playerName] then
+            PlayerInventoryChanged[playerName][item] = nil
+            refreshPetDropdownsForPlayer(playerName) -- update dropdown to remove mark
+        end
         local newState = getPetAuraState(item)
         local txt = "Evolved: " .. tostring(newState.evolved) .. "\nXP: " .. formatNum(newState.exp) .. "\nLevel: " .. formatNum(newState.level) .. "\nRequires Rebirth: " .. formatNum(newState.reqReb) .. "\nPerks:\n"
         for _, pName in ipairs({"strength", "durability", "agility", "damage"}) do
@@ -1240,7 +1260,9 @@ end)
 ui.autoGoodKarmaToggle = createToggle(f_killer, "Auto Good Karma", "autoGoodKarma", function(val) KillerState.autoGoodKarmaEnabled = val; if not val then for name in pairs(killSources.goodKarma) do killSources.goodKarma[name] = nil end end; return val end)
 ui.autoEvilKarmaToggle = createToggle(f_killer, "Auto Evil Karma", "autoEvilKarma", function(val) KillerState.autoEvilKarmaEnabled = val; if not val then for name in pairs(killSources.evilKarma) do killSources.evilKarma[name] = nil end end; return val end)
 
--- ==================== KILLER LOOPS (DUAL-HAND INDEPENDENT TARGETING) ====================
+-- ==================== KILLER LOOPS (RIGHT HAND ONLY, ANCHOR BEFORE TELEPORT) ====================
+local anchoredParts = {} -- [username] = {part, part, ...}
+
 local function getEffectiveTargetSet()
     local effective = {}
     for _, srcSet in pairs(killSources) do for name, _ in pairs(srcSet) do effective[name] = true end end
@@ -1251,81 +1273,84 @@ local function getEffectiveTargetSet()
     return effective
 end
 
-local function getValidTargets()
-    local targets = {}
-    for name, _ in pairs(getEffectiveTargetSet()) do
-        local p = Players:FindFirstChild(name)
-        if p and p.Character and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health > 0 then
-            table.insert(targets, p)
-        end
-    end
-    return targets
-end
-
--- Main Dual-Hand Attack Loop
+-- Attack loop: process one target per iteration, right hand only
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
+    local currentTarget = nil
     while true do
         task.wait(0.05)
         if State.stopEverything then continue end
         
         local punchTool = getPunch()
         local hasPunch = punchTool and punchTool.Parent == player.Character
-        local anyKillActive = KillerState.killSelectedEnabled or KillerState.killEveryoneEnabled or KillerState.autoGoodKarmaEnabled or KillerState.autoEvilKarmaEnabled
+        local anyKillActive = KillerState.killSelectedEnabled or KillerState.killEveryoneEnabled
+            or KillerState.autoGoodKarmaEnabled or KillerState.autoEvilKarmaEnabled
         
+        -- Cleanup when kill is off or punch not held
         if not hasPunch or not anyKillActive then
-            KillerState.LeftTarget = nil; KillerState.RightTarget = nil; continue
+            for _, parts in pairs(anchoredParts) do
+                for _, part in ipairs(parts) do
+                    if part and part.Parent then pcall(function() part.Anchored = false end) end
+                end
+            end
+            table.clear(anchoredParts)
+            currentTarget = nil
+            continue
         end
         
         local myChar = player.Character
         if not myChar then continue end
-        local rHand = myChar:FindFirstChild("RightHand") or myChar:FindFirstChild("Right Arm")
-        local lHand = myChar:FindFirstChild("LeftHand") or myChar:FindFirstChild("Left Arm")
+        local rightHand = myChar:FindFirstChild("RightHand") or myChar:FindFirstChild("Right Arm")
+        if not rightHand then continue end
         
-        local targets = getValidTargets()
-        
-        -- Validate Right Target
-        if KillerState.RightTarget and (not KillerState.RightTarget.Character or not KillerState.RightTarget.Character:FindFirstChild("Humanoid") or KillerState.RightTarget.Character.Humanoid.Health <= 0) then
-            KillerState.RightTarget = nil
-        end
-        -- Assign Right Target (Priority)
-        if not KillerState.RightTarget and #targets > 0 then
-            KillerState.RightTarget = targets[1]
+        -- Validate current target
+        if currentTarget then
+            local p = Players:FindFirstChild(currentTarget)
+            if not p or not p.Character or not p.Character:FindFirstChild("HumanoidRootPart") then
+                currentTarget = nil
+            end
         end
         
-        -- Validate Left Target
-        if KillerState.LeftTarget and (not KillerState.LeftTarget.Character or not KillerState.LeftTarget.Character:FindFirstChild("Humanoid") or KillerState.LeftTarget.Character.Humanoid.Health <= 0) then
-            KillerState.LeftTarget = nil
+        -- Acquire a new target if needed
+        if not currentTarget then
+            local effective = getEffectiveTargetSet()
+            for name in pairs(effective) do
+                currentTarget = name
+                break
+            end
         end
-        -- Assign Left Target (Only if there's a 2nd target available)
-        if not KillerState.LeftTarget and #targets > 1 then
-            for i = 2, #targets do
-                if targets[i] ~= KillerState.RightTarget then
-                    KillerState.LeftTarget = targets[i]
-                    break
+        
+        if not currentTarget then continue end
+        
+        local targetPlayer = Players:FindFirstChild(currentTarget)
+        if not targetPlayer or not targetPlayer.Character then continue end
+        local char = targetPlayer.Character
+        local torso = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
+        if not torso then
+            -- no torso, clear and try next iteration
+            currentTarget = nil
+            continue
+        end
+        
+        -- Anchor all parts except torso (if not already anchored)
+        if not anchoredParts[currentTarget] then
+            anchoredParts[currentTarget] = {}
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") and part ~= torso then
+                    if not part.Anchored then
+                        part.Anchored = true
+                        table.insert(anchoredParts[currentTarget], part)
+                    end
                 end
             end
         end
         
-        -- Execute Attacks & Teleport Hands
-        if KillerState.RightTarget and rHand then
-            local tTorso = KillerState.RightTarget.Character:FindFirstChild("HumanoidRootPart")
-            if tTorso then
-                rHand.CFrame = tTorso.CFrame -- Teleport MY right hand to THEIR torso
-                pcall(function() player.muscleEvent:FireServer("punch", "rightHand") end)
-            end
-        end
-        
-        if KillerState.LeftTarget and lHand then
-            local tTorso = KillerState.LeftTarget.Character:FindFirstChild("HumanoidRootPart")
-            if tTorso then
-                lHand.CFrame = tTorso.CFrame -- Teleport MY left hand to THEIR torso
-                pcall(function() player.muscleEvent:FireServer("punch", "leftHand") end)
-            end
-        end
+        -- Teleport torso to my right hand and punch
+        torso.CFrame = rightHand.CFrame
+        pcall(function() player.muscleEvent:FireServer("punch", "rightHand") end)
     end
 end))
 
--- Karma check loop
+-- Karma check loop (unchanged)
 table.insert(getgenv().ML_Expert_Loops, task.spawn(function()
     while true do
         task.wait(1)
@@ -1366,7 +1391,15 @@ Players.PlayerRemoving:Connect(function(p)
     local name = p.Name
     KillerState.selectedPlayers[name], KillerState.manualWhitelist[name], KillerState.autoWhitelist[name] = nil, nil, nil
     killSources.selected[name], killSources.everyone[name], killSources.goodKarma[name], killSources.evilKarma[name] = nil, nil, nil, nil
-    if PlayerInventoryCache[name] then PlayerInventoryCache[name] = nil end -- Clean up memory cache
+    -- Unanchor any parts left for this player
+    if anchoredParts[name] then
+        for _, part in ipairs(anchoredParts[name]) do
+            if part and part.Parent then pcall(function() part.Anchored = false end) end
+        end
+        anchoredParts[name] = nil
+    end
+    if PlayerInventoryCache[name] then PlayerInventoryCache[name] = nil end
+    if PlayerInventoryChanged[name] then PlayerInventoryChanged[name] = nil end
     refreshKillerDropdowns()
 end)
 refreshKillerDropdowns()
@@ -1679,6 +1712,12 @@ SetToggle[ui.walkOnWaterBtn](true)
 
 -- Cleanup on script unload
 local function onUnload()
+    -- Unanchor any remaining anchored parts
+    for _, parts in pairs(anchoredParts) do
+        for _, part in ipairs(parts) do
+            if part and part.Parent then pcall(function() part.Anchored = false end) end
+        end
+    end
     for _, loop in ipairs(getgenv().ML_Expert_Loops or {}) do
         if type(loop) == "thread" then pcall(task.cancel, loop) elseif type(loop) == "table" and loop.Disconnect then pcall(loop.Disconnect, loop) end
     end
