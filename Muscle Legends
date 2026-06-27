@@ -102,6 +102,7 @@ LoadTheme()
 
 local function applyTheme()
     local function applyToAll()
+        if not ScreenGui then return end  -- safety check
         for _, obj in ipairs(ScreenGui:GetDescendants()) do
             if obj:IsA("Frame") and obj ~= MainFrame and obj ~= TitleBar and obj ~= LeftPanel then
                 if obj:FindFirstChild("UIGradient") then continue end
@@ -116,9 +117,9 @@ local function applyTheme()
                 obj.CornerRadius = UDim.new(0, ThemeSettings.CornerRadius)
             end
         end
-        MainFrame.BackgroundColor3 = ThemeSettings.MainBg
-        TitleBar.BackgroundColor3 = ThemeSettings.TitleBg
-        LeftPanel.BackgroundColor3 = ThemeSettings.LeftPanelBg
+        if MainFrame then MainFrame.BackgroundColor3 = ThemeSettings.MainBg end
+        if TitleBar then TitleBar.BackgroundColor3 = ThemeSettings.TitleBg end
+        if LeftPanel then LeftPanel.BackgroundColor3 = ThemeSettings.LeftPanelBg end
         -- toggle buttons
         for _, btn in pairs(ui.toggleButtons) do
             if btn and SetToggle[btn] then
@@ -1553,7 +1554,7 @@ Players.PlayerRemoving:Connect(function(p)
 end)
 refreshKillerDropdowns()
 
--- MAIN LOOPS (unchanged)
+-- MAIN LOOPS
 table.insert(getgenv().ML_Expert_Loops, RunService.Heartbeat:Connect(function()
     if State.stopEverything then return end
     if State.autoMuscleKing and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
